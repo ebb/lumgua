@@ -1,0 +1,65 @@
+Lumgua is a programming language in the LISP tradition.
+
+
+Getting Started
+
+To try it out, you must first build the statically compiled tools,
+which are written in Go.  If you have Go set up, then maybe the
+following will work:
+
+  $ bash refresh.bash
+
+If the tools -- server, lumgua, and lispin -- were built successfully,
+then you can do something like this:
+
+1. Open up three terminal windows.
+2. Run server in the first terminal.
+3. Run lumgua in the second terminal.
+4. Run "echo '(+ 1 2)' | ./lispin" in the third terminal.
+5. Look to see if the evaluated result was printed in the first
+   terminal.
+
+If you use emacs, take a look at lumgua.el.  It can be used to
+interactively evaluate lumgua expressions.  It's pretty
+straightforward but I won't put instructions here.
+
+
+The Language
+
+Lumgua is a transitional form.  It is based on an earlier project and
+I intend to use it as a starting point for another project.  As a
+language, it has just enough functionality to host its compiler and
+interactive loop.
+
+The virtual stack machine it uses for evaluation is based on code from
+Paradigms of Artificial Intelligence Programming by Peter Norvig and
+Three Implementation Models for Scheme by R. Kent Dybvig.
+
+I have provided means for showing the stack code of a given function
+and for inspecting the stack of a continuation.
+
+As a LISP, the two most noticeable quirks are probably, (1) the use of
+"func" instead of "lambda", and (2) the use of "jmp" to explicitly
+request tail-call optimization.  I like "func" because it is shorter
+and easier to type.  I like "jmp" because it allows me to more easily
+debug code that has incidental tail-calls.
+
+Another small decision that goes through the Lumgua code is my use of
+pattern-matching.  I think it makes for readable code.
+
+
+The Future
+
+Here are a few ideas for the future:
+
+1. Compile to Javascript using CPS (see RABBIT).
+2. Concurrency (again).
+3. Disable user macro writing.
+4. Package system for managing the global namespace (see Go).
+5. Disable global variable mutation.
+6. A better dynamic loader.
+
+And for the distant future:
+
+1. Algebraic types and static type analysis.
+2. Monads and pure functions.
