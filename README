@@ -16,7 +16,7 @@ then you can do something like this:
 2. Run server in the first terminal.
 3. Run lumgua in the second terminal.
 4. Run "echo '(+ 1 2)' | ./lispin" in the third terminal.
-5. Look to see if the evaluated result was printed in the first
+5. Look to see if the evaluated result was printed in the second
    terminal.
 
 If you use emacs, take a look at lumgua.el.  It can be used to
