@@ -1,0 +1,11 @@
+Roadmap
+
+Here's a list of work underway or under consideration:
+
+  * Loader improvements.
+  * More-readable FASL format.
+  * Package system.
+  * Debugger improvements.
+  * Better error-handling mechanisms.
+  * Delimited continuations.
+  * System libraries for Linux.

@@ -1,4 +1,13 @@
-Lumgua is a programming language in the LISP tradition.
+Lumgua is a simple functional programming language.  Sample code:
+
+  (define compile
+    (func (exp)
+      (assemble
+       (match (first (comp `(func () ,(macroexpandall exp))
+			   '(env nil nil)
+			   nil nil))
+	 ((close template)
+	  template)))))
 
 
 Getting Started
@@ -12,54 +21,63 @@ following will work:
 If the tools -- server, lumgua, and lispin -- were built successfully,
 then you can do something like this:
 
-1. Open up three terminal windows.
-2. Run server in the first terminal.
-3. Run lumgua in the second terminal.
-4. Run "echo '(+ 1 2)' | ./lispin" in the third terminal.
-5. Look to see if the evaluated result was printed in the second
-   terminal.
+  1. Open up three terminal windows.
+  2. Run server in the first terminal:
+       $ ./server
+  3. Run lumgua in the second terminal:
+       $ ./lumgua core compile text debug repl
+  4. Try an evaluation in the third terminal.
+       $ echo '(+ 1 2)' | ./lispin
+  5. Look to see if the evaluated result was printed in the second
+     terminal.
 
 If you use emacs, take a look at lumgua.el.  It can be used to
-interactively evaluate lumgua expressions.  It's pretty
+interactively evaluate Lumgua expressions.  It's pretty
 straightforward but I won't put instructions here.
 
 
 The Language
 
-Lumgua is a transitional form.  It is based on an earlier project and
-I intend to use it as a starting point for another project.  As a
-language, it has just enough functionality to host its compiler and
-interactive loop.
+Lumgua is a very simple Scheme/ML hybrid.
 
-The virtual stack machine it uses for evaluation is based on code from
-Paradigms of Artificial Intelligence Programming by Peter Norvig and
-Three Implementation Models for Scheme by R. Kent Dybvig.
+Scheme similarities:
 
-I have provided means for showing the stack code of a given function
-and for inspecting the stack of a continuation.
+  * S-expression syntax and data.
+  * No type system.
+  * Same calling convention.
 
-As a LISP, the two most noticeable quirks are probably, (1) the use of
-"func" instead of "lambda", and (2) the use of "jmp" to explicitly
-request tail-call optimization.  I like "func" because it is shorter
-and easier to type.  I like "jmp" because it allows me to more easily
-debug code that has incidental tail-calls.
+ML similarities:
 
-Another small decision that goes through the Lumgua code is my use of
-pattern-matching.  I think it makes for readable code.
+  * No macros.
+  * No variable mutation.
+  * Early binding.
+  * Lists are immutable.
+
+Some important similarities shared with both Scheme and ML:
+
+  * Tail-calls.
+  * Continuations.
+  * Pattern matching.
+  * Call-by-value evaluation.
+
+Lumgua is also significantly different from both Scheme and ML.  For
+example:
+
+  * The set of data constructors is fixed.
+  * There is no language definition.
+  * Tail-call compilation is subject to programmer control.
 
 
-The Future
+The Implementation
 
-Here are a few ideas for the future:
+The implementation has a few useful features beyond mere evaluation:
 
-1. Compile to Javascript using CPS (see RABBIT).
-2. Concurrency (again).
-3. Disable user macro writing.
-4. Package system for managing the global namespace (see Go).
-5. Disable global variable mutation.
-6. A better dynamic loader.
+  * Interaction with emacs.
+  * Reasonably useful stack traces.
+  * Disassembly of functions.
+  * Bootstrapped compiler.
 
-And for the distant future:
+The following publications have been used extensively for inspiration:
 
-1. Algebraic types and static type analysis.
-2. Monads and pure functions.
+  * Paradigms of Artificial Intelligence Programming by Peter Norvig.
+  * Three Implementation Models for Scheme by R. Kent Dybvig.

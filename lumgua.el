@@ -1,3 +1,29 @@
+;; (put 'func 'lisp-indent-function 1)
+;; (put 'match 'lisp-indent-function 1)
+
+(defun lumgua-run-file ()
+  (interactive)
+  (when (null lumgua-path)
+    (error "You must set lumgua-path"))
+  (let ((name (buffer-name)))
+    (let ((end (string-match "\\.lisp" name)))
+      (when (and (numberp end) (> end 0))
+	(shell-command (concat "echo '(exec \"./lumgua\" \"core\" \"text\" \"debug\" "
+			       "\"compile\" "
+			       (concat "\"" (substring name 0 end) "\"")
+			       ")' | ./lispin"))))))
+
+(defun lumgua-compile-file ()
+  (interactive)
+  (when (null lumgua-path)
+    (error "You must set lumgua-path"))
+  (let ((name (buffer-name)))
+    (let ((end (string-match "\\.lisp" name)))
+      (when (and (numberp end) (> end 0))
+	(shell-command (concat "echo '(compilefile \""
+			       (substring name 0 end)
+			       "\")' | ./lispin"))))))
+
 (defvar lumgua-path nil
   "The path of the directory containing `lispin'.")
 

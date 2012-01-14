@@ -18,21 +18,21 @@ func put(r *http.Request) {
 	io.Copy(f, r.Body)
 }
 
-func get(c http.ResponseWriter, r *http.Request) {
+func get(w http.ResponseWriter, r *http.Request) {
 	f, _ := os.Open("./" + r.URL.Path)
-	io.Copy(c, f)
+	io.Copy(w, f)
 }
 
-func rootHandler(c http.ResponseWriter, r *http.Request) {
+func rootHandler(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case "GET":
-		get(c, r)
+		get(w, r)
 	case "PUT":
 		put(r)
 	}
 }
 
-func logHandler(c http.ResponseWriter, r *http.Request) {
+func logHandler(_ http.ResponseWriter, r *http.Request) {
 	if r.Method != "POST" {
 		return
 	}

@@ -2,9 +2,11 @@ package main
 
 import (
 	"container/vector"
+	"exec"
 	"flag"
 	"fmt"
 	"http"
+	"io"
 	"io/ioutil"
 	"json"
 	"log"
@@ -12,6 +14,8 @@ import (
 	"os"
 	"reflect"
 	"strings"
+	"time"
+	"url"
 )
 
 /// command-line arguments
@@ -21,7 +25,6 @@ var address *string = flag.String("a", ":8082", "address")
 /// global state
 
 var globals map[string]*Binding
-var macros map[string]bool
 var sched *Scheduler
 
 var faslDict map[string]FaslCombiner
@@ -517,46 +520,6 @@ func (*pushInstr) Exec(m *Machine) {
 
 func (*pushInstr) Sexp() Value {
 	return list(Symbol("push"))
-}
-
-type setInstr struct {
-	name  string
-	cache *Binding
-}
-
-func newSetInstr(arg Value) Instr {
-	return &setInstr{string(arg.(Symbol)), &Binding{unboundGlobalValue}}
-}
-
-func assignTemplateNames(temp *Template, name string) {
-	temp.name = name
-	n := len(temp.code)
-	for i := 0; i < n; i++ {
-		if instr, ok := temp.code[i].(*closeInstr); ok {
-			subname := fmt.Sprintf("%s:%d", name, i)
-			instr.temp.name = subname
-			assignTemplateNames(instr.temp, subname)
-		}
-	}
-}
-
-func (instr *setInstr) Exec(m *Machine) {
-	if instr.cache.value == unboundGlobalValue {
-		binding, ok := globals[instr.name]
-		if !ok {
-			m.throw("undefined global: " + instr.name)
-			return
-		}
-		instr.cache = binding
-	}
-	instr.cache.value = m.a
-	if f, ok := m.a.(*Func); ok {
-		assignTemplateNames(f.temp, instr.name)
-	}
-}
-
-func (instr *setInstr) Sexp() Value {
-	return list(Symbol("set"), Symbol(instr.name))
 }
 
 type fjumpInstr struct {
@@ -1269,18 +1232,18 @@ func primDef(args ...Value) (Value, os.Error) {
 	if !ok {
 		return nil, os.NewError("def: type error")
 	}
-	if _, ok := globals[string(name)]; !ok {
-		globals[string(name)] = &Binding{name}
+	_, ok = globals[string(name)]
+	if ok {
+		return nil, os.NewError(
+			"def: multiple definitions for " +
+			string(name),
+		)
 	}
-	return args[0], nil
-}
-
-func primMac(args ...Value) (Value, os.Error) {
-	name, ok := args[0].(Symbol)
-	if !ok {
-		return nil, os.NewError("mac: type error")
+	globals[string(name)] = &Binding{args[1]}
+	switch f := args[1].(type) {
+	case *Func:
+		f.temp.name = string(name)
 	}
-	macros[string(name)] = true
 	return args[0], nil
 }
 
@@ -1297,15 +1260,6 @@ func primGlobal(args ...Value) (Value, os.Error) {
 	return nil, os.NewError("global: unbound")
 }
 
-func primMacrop(args ...Value) (Value, os.Error) {
-	name, ok := args[0].(Symbol)
-	if !ok {
-		return Nil{}, nil
-	}
-	p, ok := macros[string(name)]
-	return truth(ok && p), nil
-}
-
 func primLog(args ...Value) (Value, os.Error) {
 	s, ok := args[0].(String)
 	if !ok {
@@ -1313,14 +1267,6 @@ func primLog(args ...Value) (Value, os.Error) {
 	}
 	fmt.Println(string(s))
 	return Nil{}, nil
-}
-
-func primThrow(args ...Value) (Value, os.Error) {
-	s, ok := args[0].(String)
-	if !ok {
-		return nil, os.NewError("throw: type error")
-	}
-	return nil, os.NewError(string(s))
 }
 
 type stringBody struct {
@@ -1331,14 +1277,14 @@ func (b stringBody) Close() os.Error {
 	return nil
 }
 
-func httpPut(url string, body string) os.Error {
-	bakedURL, err := http.ParseURL(url)
+func httpPut(rawURL string, body string) os.Error {
+	bakedURL, err := url.Parse(rawURL)
 	if err != nil {
 		return os.NewError("http: parse url fail: " + err.String())
 	}
 	request := &http.Request{
 		URL:    bakedURL,
-		RawURL: url,
+		RawURL: rawURL,
 		Method: "PUT",
 		Header: http.Header(
 			map[string][]string{
@@ -1347,7 +1293,6 @@ func httpPut(url string, body string) os.Error {
 				},
 			},
 		),
-		Referer: "",
 		Host:    bakedURL.Host,
 		Body: stringBody{
 			strings.NewReader(body),
@@ -1406,6 +1351,56 @@ func primHttp(args ...Value) (Value, os.Error) {
 	return nil, os.NewError("http: unsupported method: " + string(method))
 }
 
+func primNow(args ...Value) (Value, os.Error) {
+	ns := time.Nanoseconds()
+	return Number(float64(ns / 1000000)), nil
+}
+
+func primExec(args ...Value) (Value, os.Error) {
+	var s String
+	var ok bool
+	var err os.Error
+	if len(args) != 2 {
+		return nil, os.NewError("exec: wrong number of arguments")
+	}
+	s, ok = args[0].(String)
+	if !ok {
+		return nil, os.NewError("exec: bad program name")
+	}
+	cmdname := string(s)
+	cmdargs := make([]string, 0)
+	err = forEach(args[1], func (arg Value) os.Error {
+		s, ok = arg.(String)
+		if !ok {
+			return os.NewError("exec: bad argument")
+		}
+		cmdargs = append(cmdargs, string(s))
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	cmd := exec.Command(cmdname, cmdargs...)
+	p, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, os.NewError("exec: pipe fail")
+	}
+	go io.Copy(os.Stdout, p)
+	err = cmd.Run()
+	if err != nil {
+		return nil, err
+	}
+	return Nil{}, nil
+}
+
+func primExit(args ...Value) (Value, os.Error) {
+	if len(args) != 1 || !numberp(args[0]) {
+		return nil, os.NewError("exit: bad argument list")
+	}
+	os.Exit(int(args[0].(Number)))
+	return nil, os.NewError("exit: failed to exit!")
+}
+
 var primDecls = [][]interface{}{
 	{"symbolp x", primSymbolp},
 	{"numberp x", primNumberp},
@@ -1450,13 +1445,13 @@ var primDecls = [][]interface{}{
 	{"> a b", primGt},
 	{"<= a b", primLe},
 	{">= a b", primGe},
-	{"def name", primDef},
-	{"mac name", primMac},
+	{"def var val", primDef},
 	{"global name", primGlobal},
-	{"macrop name", primMacrop},
 	{"log text", primLog},
-	{"throw text", primThrow},
 	{"http method url . args", primHttp},
+	{"now", primNow},
+	{"exec cmd . args", primExec},
+	{"exit code", primExit},
 }
 
 func define(name string, value Value) {
@@ -1465,7 +1460,7 @@ func define(name string, value Value) {
 
 func makePrim(decl []interface{}) *Template {
 	protocol := decl[0].(string)
-	parts := strings.Split(protocol, " ", -1)
+	parts := strings.Split(protocol, " ")
 	name := parts[0]
 	nargs := len(parts) - 1
 	dottedp := false
@@ -1554,8 +1549,6 @@ func makeInstr(opcode string, args Value) Instr {
 		return newFreeInstr(arg)
 	case "push":
 		return newPushInstr()
-	case "set":
-		return newSetInstr(arg)
 	case "fjump":
 		return newFjumpInstr(arg)
 	case "jump":
@@ -1788,10 +1781,10 @@ func parseModule(v interface{}) (mod *Module, err os.Error) {
 
 func initLoader() {
 	faslDict = map[string]FaslCombiner{
-		"string":   FaslCombiner(parseString),
-		"list":     FaslCombiner(parseList),
-		"dotted":   FaslCombiner(parseDotted),
-		"template": FaslCombiner(parseTemplate),
+		"string":   parseString,
+		"list":     parseList,
+		"dotted":   parseDotted,
+		"template": parseTemplate,
 	}
 }
 
@@ -1799,12 +1792,19 @@ func initInterpreter() {
 	unboundGlobalValue = &Cons{Nil{}, Nil{}}
 	sharedPrimStack = make([]Value, 8)
 	globals = make(map[string]*Binding)
-	macros = make(map[string]bool)
 	loadPrims()
 }
 
 func initScheduler() {
 	sched = newScheduler()
+}
+
+func loadFile(name string) {
+	mod, err := fetchModule(name, *address)
+	if err != nil {
+		log.Fatalln(err)
+	}
+	sched.start(mod.f)
 }
 
 func init() {
@@ -1815,9 +1815,7 @@ func init() {
 
 func main() {
 	flag.Parse()
-	mod, err := fetchModule("lumgua", *address)
-	if err != nil {
-		log.Fatalln(err)
+	for _, name := range flag.Args() {
+		loadFile(name)
 	}
-	sched.start(mod.f)
 }
