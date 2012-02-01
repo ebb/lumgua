@@ -233,16 +233,6 @@
      ((arrayp x) "<array>")
      (t (throw "write: unknown type")))))
 
-(define listfromarray
-  (func (a)
-    (let ((len (arraylength a))
-	  (x (cellnew nil)))
-      (for 1 (+ len 1)
-	   (func (i)
-	     (cellput x (cons (arrayget a (- len i))
-			      (cellget x)))))
-      (cellget x))))
-
 (define arrayfromlist
   (func (x)
     (cond
