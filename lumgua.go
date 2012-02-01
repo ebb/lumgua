@@ -25,7 +25,6 @@ var address *string = flag.String("a", ":8082", "address")
 /// global state
 
 var globals map[string]*Binding
-var sched *Scheduler
 
 var faslDict map[string]FaslCombiner
 
@@ -659,42 +658,10 @@ func newMachine(f *Func) *Machine {
 	}
 }
 
-func (m *Machine) run(quota int) {
-	for i := 0; i < quota; i++ {
+func (m *Machine) run() {
+	for m.status == RUNNING {
 		m.pc++
 		m.code[m.pc-1].Exec(m)
-		if m.status != RUNNING {
-			break
-		}
-	}
-}
-
-/// concurrency
-
-type Process struct {
-	m *Machine
-}
-
-type Scheduler struct {
-	currentProc *Process
-}
-
-func newScheduler() *Scheduler {
-	return new(Scheduler)
-}
-
-func (s *Scheduler) addProcess(p *Process) {
-	s.currentProc = p
-}
-
-func (s *Scheduler) start(f *Func) {
-	s.addProcess(&Process{newMachine(f)})
-	s.run()
-}
-
-func (s *Scheduler) run() {
-	for s.currentProc.m.status != HALTED {
-		s.currentProc.m.run(100)
 	}
 }
 
@@ -1795,22 +1762,18 @@ func initInterpreter() {
 	loadPrims()
 }
 
-func initScheduler() {
-	sched = newScheduler()
-}
-
 func loadFile(name string) {
 	mod, err := fetchModule(name, *address)
 	if err != nil {
 		log.Fatalln(err)
 	}
-	sched.start(mod.f)
+	m := newMachine(mod.f)
+	m.run()
 }
 
 func init() {
 	initLoader()
 	initInterpreter()
-	initScheduler()
 }
 
 func main() {
