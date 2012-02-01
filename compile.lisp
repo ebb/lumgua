@@ -506,23 +506,6 @@
      (t
       (throw "tofasl: unexpected type")))))
 
-(define refreshimage
-  (func ()
-    (let ((text (http 'get "http://localhost:8082/lumgua.lisp")))
-      (let ((exps (readall text))
-	    (fasl (cellnew "[\n")))
-	(cond
-	 ((not (consp exps))
-	  (throw "compilefile: no expressions")))
-	(strextend fasl (tofasl (compile (car exps))))
-	(foreach (func (exp)
-		   (log (write exp))
-		   (strextend fasl ",\n" (tofasl (compile exp))))
-		 (cdr exps))
-	(strextend fasl "\n]\n")
-	(http 'put "http://localhost:8082/lumgua.fasl" (cellget fasl))
-	(log "done!")))))
-
 (define compilefile
   (func (name)
     (let ((text (http 'get (strcat "http://localhost:8082/"
