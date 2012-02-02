@@ -2,10 +2,30 @@ Roadmap
 
 Here's a list of work underway or under consideration:
 
-  * Loader improvements.
-  * More-readable FASL format.
-  * Package system.
-  * Debugger improvements.
-  * Better error-handling mechanisms.
-  * Delimited continuations.
-  * System libraries for Linux.
+ Debootstrapping:
+
+  - Translate the reader to Go using goyacc.
+  - Translate the compiler to Go.
+  - Remove all FASL files from the repo.
+  - Consider using the gob format for FASL files.
+
+ Expressiveness:
+
+  - Package system.
+  - Concurrency.
+  - Local mutual recursion.
+  - Delimited continuations.
+  - Dynamic scope.
+  - Better error-handling mechanisms.
+
+ Pragmatics:
+
+  - Debugger improvements.
+  - System libraries for Linux.
+
+ Optimization:
+
+  - Inline ((func ...) ...) and (apply (func ...) ...).
+  - Maybe coalesce common instruction sequences for less dispatching.
+  - Inline calls to statically-known primitives.
+  - Optimize calls to statically-known functions.
