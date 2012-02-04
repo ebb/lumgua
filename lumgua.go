@@ -1530,9 +1530,9 @@ loop:	for {
 	if atom == "nil" {
 		return Nil{}, nil
 	}
-	i, err := strconv.Atoi(atom)
+	n, err := strconv.Atof64(atom)
 	if err == nil {
-		return Number(i), nil
+		return Number(n), nil
 	}
 	return Symbol(atom), nil
 }
