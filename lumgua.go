@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"container/vector"
 	"exec"
 	"flag"
@@ -13,6 +14,7 @@ import (
 	"math"
 	"os"
 	"reflect"
+	"strconv"
 	"strings"
 	"time"
 	"url"
@@ -1419,6 +1421,7 @@ var primDecls = [][]interface{}{
 	{"now", primNow},
 	{"exec cmd . args", primExec},
 	{"exit code", primExit},
+	{"primreadall s", primReadAll},
 }
 
 func define(name string, value Value) {
@@ -1478,6 +1481,229 @@ func loadPrims() {
 		},
 		nil,
 	})
+}
+
+/// reader
+
+func nextLine(buf io.ByteScanner) {
+	for {
+		b, err := buf.ReadByte()
+		if err != nil || b == '\n' {
+			break
+		}
+	}
+}
+
+func skipws(buf io.ByteScanner) {
+	for {
+		b, err := buf.ReadByte()
+		if err != nil {
+			break
+		}
+		switch b {
+		case ' ', '\t', '\n':
+			continue
+		case ';':
+			nextLine(buf)
+			continue
+		}
+		buf.UnreadByte()
+		break
+	}
+}
+
+func readAtom(buf io.ByteScanner) (Value, os.Error) {
+	atomBuf := make([]byte, 0)
+loop:	for {
+		b, err := buf.ReadByte()
+		if err != nil {
+			break
+		}
+		switch b {
+		case '(', ')', '\'', '"', ' ', '\t', '\n':
+			buf.UnreadByte()
+			break loop
+		}
+		atomBuf = append(atomBuf, b)
+	}
+	atom := string(atomBuf)
+	if atom == "nil" {
+		return Nil{}, nil
+	}
+	i, err := strconv.Atoi(atom)
+	if err == nil {
+		return Number(i), nil
+	}
+	return Symbol(atom), nil
+}
+
+func readQuote(buf io.ByteScanner) (Value, os.Error) {
+	x, err := read(buf)
+	if err != nil {
+		return Nil{}, err
+	}
+	return list(Symbol("quote"), x), nil
+}
+
+func readQuasi(buf io.ByteScanner) (Value, os.Error) {
+	x, err := read(buf)
+	if err != nil {
+		return Nil{}, err
+	}
+	return list(Symbol("quasiquote"), x), nil
+}
+
+func readComma(buf io.ByteScanner) (Value, os.Error) {
+	b, err := buf.ReadByte()
+	if err != nil {
+		return Nil{}, os.NewError("read: incomplete comma")
+	}
+	tag := Symbol("unquote")
+	if b == '@' {
+		tag = Symbol("unquotesplicing")
+	} else {
+		buf.UnreadByte()
+	}
+	x, err := read(buf)
+	if err != nil {
+		return Nil{}, err
+	}
+	return list(tag, x), nil
+}
+
+func readString(buf io.ByteScanner) (Value, os.Error) {
+	strbuf := make([]byte, 0)
+loop:	for {
+		b, err := buf.ReadByte()
+		if err != nil {
+			break
+		}
+		switch b {
+		case '"':
+			return String(string(strbuf)), nil
+		case '\\':
+			b, err := buf.ReadByte()
+			if err != nil {
+				break loop
+			}
+			switch b {
+			case 't':
+				strbuf = append(strbuf, '\t')
+			case 'n':
+				strbuf = append(strbuf, '\n')
+			case '\\':
+				strbuf = append(strbuf, '\\')
+			case '"':
+				strbuf = append(strbuf, '"')
+			default:
+				return Nil{}, os.NewError(
+					"read: unknown escape: \\" + string(b),
+				)
+			}
+		default:
+			strbuf = append(strbuf, b)
+		}
+	}
+	return Nil{}, os.NewError("read: unterminated string")
+}
+
+func readList(buf io.ByteScanner) (Value, os.Error) {
+	exps := []Value{}
+loop:	for {
+		skipws(buf)
+		b, err := buf.ReadByte()
+		if err != nil {
+			return Nil{}, os.NewError("read: unmatched \"(\"")
+		}
+		switch b {
+		case ')':
+			break loop
+		case '.':
+			if len(exps) == 0 {
+				return Nil{}, os.NewError(
+					"read: ill-formed dotted list",
+				)
+			}
+			finalForm, err := read(buf)
+			if err != nil {
+				return Nil{}, err
+			}
+			skipws(buf)
+			b, err = buf.ReadByte()
+			if err != nil || b != ')' {
+				return Nil{}, os.NewError(
+					"read: ill-formed dotted list",
+				)
+			}
+			exps[len(exps)-1] = &Cons{
+				exps[len(exps)-1],
+				finalForm,
+			}
+			break loop
+		default:
+			buf.UnreadByte()
+			x, err := read(buf)
+			if err != nil {
+				return Nil{}, err
+			}
+			exps = append(exps, x)
+		}
+	}
+	return list(exps...), nil
+}
+
+func read(buf io.ByteScanner) (Value, os.Error) {
+	skipws(buf)
+	b, err := buf.ReadByte()
+	if err != nil {
+		return Nil{}, os.NewError("read: incomplete input")
+	}
+	var reader func (io.ByteScanner) (Value, os.Error)
+	switch b {
+	case '`':
+		reader = readQuasi
+	case ',':
+		reader = readComma
+	case '(':
+		reader = readList
+	case '\'':
+		reader = readQuote
+	case '"':
+		reader = readString
+	case ')':
+		return Nil{}, os.NewError("read: unbalanced \")\"")
+	}
+	if reader != nil {
+		x, err := reader(buf)
+		if err != nil {
+			return Nil{}, err
+		}
+		return x, nil
+	}
+	buf.UnreadByte()
+	a, err := readAtom(buf)
+	return a, err
+}
+
+func primReadAll(args ...Value) (Value, os.Error) {
+	if len(args) != 1 || !stringp(args[0]) {
+		return nil, os.NewError("readall: type error")
+	}
+	s := string(args[0].(String))
+	buf := bytes.NewBufferString(s)
+	exps := make([]Value, 0, 256)
+	for {
+		skipws(buf)
+		if buf.Len() == 0 {
+			break
+		}
+		exp, err := read(buf)
+		if err != nil {
+			return Nil{}, err
+		}
+		exps = append(exps, exp)
+	}
+	return list(exps...), nil
 }
 
 /// loading
