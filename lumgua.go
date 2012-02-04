@@ -30,11 +30,15 @@ var globals map[string]*Binding
 
 var faslDict map[string]FaslCombiner
 
+var symbolTable map[string]*Symbol
+
 /// lisp types
 
 type Value interface{}
 
-type Symbol string
+type Symbol struct {
+	name string
+}
 
 type Number float64
 
@@ -72,7 +76,7 @@ type Array struct {
 }
 
 func symbolp(x Value) (ok bool) {
-	_, ok = x.(Symbol)
+	_, ok = x.(*Symbol)
 	return
 }
 
@@ -126,6 +130,15 @@ func listp(x Value) (ok bool) {
 func anyp(x Value) (ok bool) {
 	ok = true
 	return
+}
+
+func intern(name string) *Symbol {
+	sym, ok := symbolTable[name]
+	if !ok {
+		sym = &Symbol{name}
+		symbolTable[name] = sym
+	}
+	return sym
 }
 
 /// lisp data accessors
@@ -240,7 +253,7 @@ func (*continuationInstr) Exec(m *Machine) {
 }
 
 func (instr *continuationInstr) Sexp() Value {
-	return list(Symbol("continuation"))
+	return list(intern("continuation"))
 }
 
 type closeInstr struct {
@@ -276,7 +289,7 @@ func (instr *closeInstr) Exec(m *Machine) {
 }
 
 func (instr *closeInstr) Sexp() Value {
-	return list(Symbol("close"), instr.temp)
+	return list(intern("close"), instr.temp)
 }
 
 type frameInstr struct {
@@ -294,7 +307,7 @@ func (instr *frameInstr) Exec(m *Machine) {
 }
 
 func (instr *frameInstr) Sexp() Value {
-	return list(Symbol("frame"), Number(instr.pc))
+	return list(intern("frame"), Number(instr.pc))
 }
 
 type shiftInstr struct{}
@@ -317,7 +330,7 @@ func (*shiftInstr) Exec(m *Machine) {
 }
 
 func (*shiftInstr) Sexp() Value {
-	return list(Symbol("shift"))
+	return list(intern("shift"))
 }
 
 type applyInstr struct {
@@ -411,7 +424,7 @@ func (instr *applyInstr) Exec(m *Machine) {
 }
 
 func (instr *applyInstr) Sexp() Value {
-	return list(Symbol("apply"), Number(instr.nargs))
+	return list(intern("apply"), Number(instr.nargs))
 }
 
 type returnInstr struct{}
@@ -431,7 +444,7 @@ func (*returnInstr) Exec(m *Machine) {
 }
 
 func (*returnInstr) Sexp() Value {
-	return list(Symbol("return"))
+	return list(intern("return"))
 }
 
 type constInstr struct {
@@ -447,7 +460,7 @@ func (instr *constInstr) Exec(m *Machine) {
 }
 
 func (instr *constInstr) Sexp() Value {
-	return list(Symbol("const"), instr.val)
+	return list(intern("const"), instr.val)
 }
 
 type Binding struct {
@@ -461,7 +474,7 @@ type globalInstr struct {
 }
 
 func newGlobalInstr(arg Value) Instr {
-	return &globalInstr{string(arg.(Symbol))}
+	return &globalInstr{arg.(*Symbol).name}
 }
 
 func (instr *globalInstr) Exec(m *Machine) {
@@ -474,7 +487,7 @@ func (instr *globalInstr) Exec(m *Machine) {
 }
 
 func (instr *globalInstr) Sexp() Value {
-	return list(Symbol("global"), Symbol(instr.name))
+	return list(intern("global"), intern(instr.name))
 }
 
 type localInstr struct {
@@ -490,7 +503,7 @@ func (instr *localInstr) Exec(m *Machine) {
 }
 
 func (instr *localInstr) Sexp() Value {
-	return list(Symbol("local"), Number(instr.n))
+	return list(intern("local"), Number(instr.n))
 }
 
 type freeInstr struct {
@@ -506,7 +519,7 @@ func (instr *freeInstr) Exec(m *Machine) {
 }
 
 func (instr *freeInstr) Sexp() Value {
-	return list(Symbol("free"), Number(instr.n))
+	return list(intern("free"), Number(instr.n))
 }
 
 type pushInstr struct{}
@@ -520,7 +533,7 @@ func (*pushInstr) Exec(m *Machine) {
 }
 
 func (*pushInstr) Sexp() Value {
-	return list(Symbol("push"))
+	return list(intern("push"))
 }
 
 type fjumpInstr struct {
@@ -538,7 +551,7 @@ func (instr *fjumpInstr) Exec(m *Machine) {
 }
 
 func (instr *fjumpInstr) Sexp() Value {
-	return list(Symbol("fjump"), Number(instr.pc))
+	return list(intern("fjump"), Number(instr.pc))
 }
 
 type jumpInstr struct {
@@ -554,7 +567,7 @@ func (instr *jumpInstr) Exec(m *Machine) {
 }
 
 func (instr *jumpInstr) Sexp() Value {
-	return list(Symbol("jump"), Number(instr.pc))
+	return list(intern("jump"), Number(instr.pc))
 }
 
 type haltInstr struct{}
@@ -568,7 +581,7 @@ func (*haltInstr) Exec(m *Machine) {
 }
 
 func (*haltInstr) Sexp() Value {
-	return list(Symbol("halt"))
+	return list(intern("halt"))
 }
 
 type primInstr struct {
@@ -602,7 +615,7 @@ func (instr *primInstr) Exec(m *Machine) {
 }
 
 func (instr *primInstr) Sexp() Value {
-	return list(Symbol("prim"), Symbol(instr.name))
+	return list(intern("prim"), intern(instr.name))
 }
 
 type Stack struct {
@@ -640,7 +653,7 @@ func freshStack() Stack {
 			&Template{
 				"halt", 0, false, nil,
 				[]Instr{
-					&constInstr{Symbol("normal")},
+					&constInstr{intern("normal")},
 					&haltInstr{},
 				},
 			},
@@ -673,7 +686,7 @@ type Prim func(...Value) (Value, os.Error)
 
 func truth(x bool) Value {
 	if x {
-		return Symbol("t")
+		return intern("t")
 	}
 	return Nil{}
 }
@@ -715,8 +728,8 @@ func primArrayp(args ...Value) (Value, os.Error) {
 }
 
 func primSymbolName(args ...Value) (Value, os.Error) {
-	if sym, ok := args[0].(Symbol); ok {
-		return String(string(sym)), nil
+	if sym, ok := args[0].(*Symbol); ok {
+		return String(sym.name), nil
 	}
 	return nil, os.NewError("symbolname: type error")
 }
@@ -739,8 +752,8 @@ func primCdr(args ...Value) (Value, os.Error) {
 	return nil, os.NewError("cdr: type error")
 }
 
-func makeFreeRef(kind Symbol, i Number) (r FreeRef, err os.Error) {
-	switch string(kind) {
+func makeFreeRef(kind *Symbol, i Number) (r FreeRef, err os.Error) {
+	switch kind.name {
 	case "local":
 		r.kind = LOCAL
 	case "free":
@@ -769,7 +782,7 @@ func packFreeRefs(src Value) ([]FreeRef, os.Error) {
 			)
 		}
 		freeRefs[i], err = makeFreeRef(
-			spec.At(0).(Symbol),
+			spec.At(0).(*Symbol),
 			spec.At(1).(Number),
 		)
 		if err != nil {
@@ -791,13 +804,13 @@ func packCode(src Value) ([]Instr, os.Error) {
 	for i := 0; i < n; i++ {
 		switch x := a.At(i).(type) {
 		case *Cons:
-			opcode, ok := x.car.(Symbol)
+			opcode, ok := x.car.(*Symbol)
 			if !ok {
 				return nil, os.NewError(
 					"packCode: non-symbol opcode",
 				)
 			}
-			code[i] = makeInstr(string(opcode), x.cdr)
+			code[i] = makeInstr(opcode.name, x.cdr)
 		default:
 			return nil, os.NewError("packCode: bad argument")
 		}
@@ -861,7 +874,7 @@ func primTemplateOpen(args ...Value) (Value, os.Error) {
 		code = &Cons{unpackInstr(temp.code[i]), code}
 	}
 	sexp := list(
-		Symbol("template"),
+		intern("template"),
 		String(temp.name),
 		Number(temp.nvars),
 		truth(temp.dottedp),
@@ -898,7 +911,7 @@ func primFuncOpen(args ...Value) (Value, os.Error) {
 		envArray.Push(elt)
 	}
 	sexp := list(
-		Symbol("func"),
+		intern("func"),
 		f.temp,
 		envArray,
 	)
@@ -917,7 +930,7 @@ func primContOpen(args ...Value) (Value, os.Error) {
 			stack.Set(i, Number(n))
 		}
 	}
-	return list(Symbol("cont"), stack), nil
+	return list(intern("cont"), stack), nil
 }
 
 func primArrayNew(args ...Value) (Value, os.Error) {
@@ -1063,7 +1076,7 @@ func primIntern(args ...Value) (Value, os.Error) {
 	if !ok {
 		return nil, os.NewError("intern: type error")
 	}
-	return Symbol(string(s)), nil
+	return intern(string(s)), nil
 }
 
 func primAdd(args ...Value) (Value, os.Error) {
@@ -1197,31 +1210,32 @@ func primGe(args ...Value) (Value, os.Error) {
 }
 
 func primDef(args ...Value) (Value, os.Error) {
-	name, ok := args[0].(Symbol)
+	sym, ok := args[0].(*Symbol)
 	if !ok {
 		return nil, os.NewError("def: type error")
 	}
-	_, ok = globals[string(name)]
+	name := sym.name
+	_, ok = globals[name]
 	if ok {
 		return nil, os.NewError(
 			"def: multiple definitions for " +
-			string(name),
+			name,
 		)
 	}
-	globals[string(name)] = &Binding{args[1]}
+	globals[name] = &Binding{args[1]}
 	switch f := args[1].(type) {
 	case *Func:
-		f.temp.name = string(name)
+		f.temp.name = name
 	}
 	return args[0], nil
 }
 
 func primGlobal(args ...Value) (Value, os.Error) {
-	name, ok := args[0].(Symbol)
+	sym, ok := args[0].(*Symbol)
 	if !ok {
 		return nil, os.NewError("global: type error")
 	}
-	if binding, ok := globals[string(name)]; ok {
+	if binding, ok := globals[sym.name]; ok {
 		if binding.value != unboundGlobalValue {
 			return binding.value, nil
 		}
@@ -1276,7 +1290,7 @@ func httpPut(rawURL string, body string) os.Error {
 }
 
 func primHttp(args ...Value) (Value, os.Error) {
-	method, ok := args[0].(Symbol)
+	method, ok := args[0].(*Symbol)
 	if !ok {
 		return nil, os.NewError("http: type error")
 	}
@@ -1284,7 +1298,7 @@ func primHttp(args ...Value) (Value, os.Error) {
 	if !ok {
 		return nil, os.NewError("http: type error")
 	}
-	switch string(method) {
+	switch method.name {
 	case "get":
 		response, err := http.Get(string(url))
 		if err != nil {
@@ -1317,7 +1331,7 @@ func primHttp(args ...Value) (Value, os.Error) {
 		httpPut(string(url), string(bodyString))
 		return Nil{}, nil
 	}
-	return nil, os.NewError("http: unsupported method: " + string(method))
+	return nil, os.NewError("http: unsupported method: " + method.name)
 }
 
 func primNow(args ...Value) (Value, os.Error) {
@@ -1534,7 +1548,7 @@ loop:	for {
 	if err == nil {
 		return Number(n), nil
 	}
-	return Symbol(atom), nil
+	return intern(atom), nil
 }
 
 func readQuote(buf io.ByteScanner) (Value, os.Error) {
@@ -1542,7 +1556,7 @@ func readQuote(buf io.ByteScanner) (Value, os.Error) {
 	if err != nil {
 		return Nil{}, err
 	}
-	return list(Symbol("quote"), x), nil
+	return list(intern("quote"), x), nil
 }
 
 func readQuasi(buf io.ByteScanner) (Value, os.Error) {
@@ -1550,7 +1564,7 @@ func readQuasi(buf io.ByteScanner) (Value, os.Error) {
 	if err != nil {
 		return Nil{}, err
 	}
-	return list(Symbol("quasiquote"), x), nil
+	return list(intern("quasiquote"), x), nil
 }
 
 func readComma(buf io.ByteScanner) (Value, os.Error) {
@@ -1558,9 +1572,9 @@ func readComma(buf io.ByteScanner) (Value, os.Error) {
 	if err != nil {
 		return Nil{}, os.NewError("read: incomplete comma")
 	}
-	tag := Symbol("unquote")
+	tag := intern("unquote")
 	if b == '@' {
-		tag = Symbol("unquotesplicing")
+		tag = intern("unquotesplicing")
 	} else {
 		buf.UnreadByte()
 	}
@@ -1914,7 +1928,7 @@ func faslEval(v interface{}) Value {
 	case float64:
 		return Number(x)
 	case string:
-		return Symbol(x)
+		return intern(x)
 	case []interface{}:
 		if len(x) == 0 {
 			return Nil{}
@@ -1985,6 +1999,7 @@ func initInterpreter() {
 	unboundGlobalValue = &Cons{Nil{}, Nil{}}
 	sharedPrimStack = make([]Value, 8)
 	globals = make(map[string]*Binding)
+	symbolTable = make(map[string]*Symbol)
 	loadPrims()
 }
 
