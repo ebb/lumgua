@@ -1768,21 +1768,6 @@ func makeInstr(opcode string, args Value) Instr {
 	return nil
 }
 
-func topFunc(temps []*Template) *Func {
-	n := len(temps)
-	code := make([]Instr, 3*n+1)
-	for i := 0; i < 3*n; i += 3 {
-		code[i+0] = &frameInstr{i + 3}
-		code[i+1] = &closeInstr{temps[i/3]}
-		code[i+2] = &applyInstr{0}
-	}
-	code[3*n] = &returnInstr{}
-	return &Func{
-		&Template{"", 0, false, nil, code},
-		nil,
-	}
-}
-
 type Module struct {
 	f *Func
 }
@@ -1942,22 +1927,19 @@ func faslEval(v interface{}) Value {
 	panic(faslParseError)
 }
 
-func fetchModule(name, address string) (mod *Module, err os.Error) {
-	url := "http://" + address + "/" + name + ".fasl"
-	response, err := http.Get(url)
-	if err != nil {
-		err = os.NewError("fetchModule: HTTP fail")
-		return
+func topFunc(temps []*Template) *Func {
+	n := len(temps)
+	code := make([]Instr, 3*n+1)
+	for i := 0; i < 3*n; i += 3 {
+		code[i+0] = &frameInstr{i + 3}
+		code[i+1] = &closeInstr{temps[i/3]}
+		code[i+2] = &applyInstr{0}
 	}
-	defer response.Body.Close()
-	var v interface{}
-	err = json.NewDecoder(response.Body).Decode(&v)
-	if err != nil {
-		err = os.NewError("fetchModule: JSON fail")
-		return
+	code[3*n] = &returnInstr{}
+	return &Func{
+		&Template{"", 0, false, nil, code},
+		nil,
 	}
-	mod, err = parseModule(v)
-	return
 }
 
 func parseModule(v interface{}) (mod *Module, err os.Error) {
@@ -1986,6 +1968,33 @@ func parseModule(v interface{}) (mod *Module, err os.Error) {
 	return
 }
 
+func fetchModule(name, address string) (mod *Module, err os.Error) {
+	url := "http://" + address + "/" + name + ".fasl"
+	response, err := http.Get(url)
+	if err != nil {
+		err = os.NewError("fetchModule: HTTP fail")
+		return
+	}
+	defer response.Body.Close()
+	var v interface{}
+	err = json.NewDecoder(response.Body).Decode(&v)
+	if err != nil {
+		err = os.NewError("fetchModule: JSON fail")
+		return
+	}
+	mod, err = parseModule(v)
+	return
+}
+
+func loadFile(name string) {
+	mod, err := fetchModule(name, *address)
+	if err != nil {
+		log.Fatalln(err)
+	}
+	m := newMachine(mod.f)
+	m.run()
+}
+
 func initLoader() {
 	faslDict = map[string]FaslCombiner{
 		"string":   parseString,
@@ -2001,15 +2010,6 @@ func initInterpreter() {
 	globals = make(map[string]*Binding)
 	symbolTable = make(map[string]*Symbol)
 	loadPrims()
-}
-
-func loadFile(name string) {
-	mod, err := fetchModule(name, *address)
-	if err != nil {
-		log.Fatalln(err)
-	}
-	m := newMachine(mod.f)
-	m.run()
 }
 
 func init() {
