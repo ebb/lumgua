@@ -1720,6 +1720,29 @@ func primReadAll(args ...Value) (Value, os.Error) {
 	return list(exps...), nil
 }
 
+/// compiler
+
+func compile(exp Value) (*Template, os.Error) {
+	temp := &Template{
+		name: "",
+		nvars: 0,
+		dottedp: false,
+		freeRefs: []FreeRef{},
+		code: []Instr{
+			&frameInstr{5},
+			&constInstr{exp},
+			&pushInstr{},
+			&globalInstr{"write"},
+			&applyInstr{1},
+			&pushInstr{},
+			&globalInstr{"log"},
+			&shiftInstr{},
+			&applyInstr{1},
+		},
+	}
+	return temp, nil
+}
+
 /// loading
 
 var faslParseError = os.NewError("fasl parse error")
@@ -1986,8 +2009,50 @@ func fetchModule(name, address string) (mod *Module, err os.Error) {
 	return
 }
 
+func fetchSourceModule(name, address string) (mod *Module, err os.Error) {
+	url := "http://" + address + "/" + name + ".lisp"
+	fmt.Println(url)
+	response, err := http.Get(url)
+	if err != nil {
+		err = os.NewError("fetchSourceModule: HTTP fail")
+		return
+	}
+	defer response.Body.Close()
+	text, err := ioutil.ReadAll(response.Body)
+	if err != nil {
+		return
+	}
+	forms, err := primReadAll(String(text))
+	if err != nil {
+		return
+	}
+	temps := []*Template{}
+	err = forEach(forms, func(form Value) os.Error {
+		temp, err := compile(form)
+		if err != nil {
+			return err
+		}
+		temps = append(temps, temp)
+		return nil
+	})
+	if err != nil {
+		return
+	}
+	mod = &Module{topFunc(temps)}
+	return
+}
+
 func loadFile(name string) {
 	mod, err := fetchModule(name, *address)
+	if err != nil {
+		log.Fatalln(err)
+	}
+	m := newMachine(mod.f)
+	m.run()
+}
+
+func loadSourceFile(name string) {
+	mod, err := fetchSourceModule(name, *address)
 	if err != nil {
 		log.Fatalln(err)
 	}
@@ -2020,6 +2085,10 @@ func init() {
 func main() {
 	flag.Parse()
 	for _, name := range flag.Args() {
+		if name == "test" {
+			loadSourceFile(name)
+			continue
+		}
 		loadFile(name)
 	}
 }
