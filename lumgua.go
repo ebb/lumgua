@@ -1635,11 +1635,11 @@ loop:	for {
 					"read: ill-formed dotted list",
 				)
 			}
-			exps[len(exps)-1] = &Cons{
-				exps[len(exps)-1],
-				finalForm,
+			acc := finalForm
+			for i := len(exps) - 1; i >= 0; i-- {
+				acc = &Cons{exps[i], acc}
 			}
-			break loop
+			return acc, nil
 		default:
 			buf.UnreadByte()
 			x, err := read(buf)
@@ -1671,7 +1671,7 @@ func read(buf io.ByteScanner) (Value, os.Error) {
 	case '"':
 		reader = readString
 	case ')':
-		return Nil{}, os.NewError("read: unbalanced \")\"")
+		return Nil{}, os.NewError("read: unexpected \")\"")
 	}
 	if reader != nil {
 		x, err := reader(buf)
