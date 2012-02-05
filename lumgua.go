@@ -1722,25 +1722,209 @@ func primReadAll(args ...Value) (Value, os.Error) {
 
 /// compiler
 
-func compile(exp Value) (*Template, os.Error) {
-	temp := &Template{
+// Either an AsmLabel or an AsmInstr.
+type Asm interface {
+}
+
+type AsmLabel struct {
+	// Pointer identity is all that matters.
+}
+
+type AsmInstr struct {
+	instr Instr
+	label *AsmLabel // May be nil.
+}
+
+func (asm *AsmInstr) link(labels map[*AsmLabel]int) Instr {
+	switch instr := asm.instr.(type) {
+	case *frameInstr:
+		instr.pc = labels[asm.label]
+	case *fjumpInstr:
+		instr.pc = labels[asm.label]
+	case *jumpInstr:
+		instr.pc = labels[asm.label]
+	}
+	return asm.instr
+}
+
+func assemble(asmCode []Asm) []Instr {
+	labels := make(map[*AsmLabel]int)
+	i := 0
+	for _, asm := range asmCode {
+		switch asm := asm.(type) {
+		case *AsmLabel:
+			labels[asm] = i
+		case *AsmInstr:
+			i++
+		}
+	}
+	code := make([]Instr, i)
+	i = 0
+	for _, asm := range asmCode {
+		switch asm := asm.(type) {
+		case *AsmInstr:
+			code[i] = asm.link(labels)
+			i++
+		}
+	}
+	return code
+}
+
+func newLabel() *AsmLabel {
+	return new(AsmLabel)
+}
+
+func newPushAsm() Asm {
+	return &AsmInstr{&pushInstr{}, nil}
+}
+
+func newReturnAsm() Asm {
+	return &AsmInstr{&returnInstr{}, nil}
+}
+
+func newGlobalAsm(name string) Asm {
+	return &AsmInstr{&globalInstr{name}, nil}
+}
+
+func newConstAsm(x Value) Asm {
+	return &AsmInstr{&constInstr{x}, nil}
+}
+
+func newFrameAsm(label *AsmLabel) Asm {
+	return &AsmInstr{&frameInstr{-1}, label}
+}
+
+func newShiftAsm() Asm {
+	return &AsmInstr{&shiftInstr{}, nil}
+}
+
+func newApplyAsm(nargs int) Asm {
+	return &AsmInstr{&applyInstr{nargs}, nil}
+}
+
+func seq(seqs ...[]Asm) []Asm {
+	code := []Asm{}
+	for _, seq := range seqs {
+		code = append(code, seq...)
+	}
+	return code
+}
+
+func gen(code ...Asm) []Asm {
+	return code
+}
+
+const (
+	NONTAIL = iota
+	TAIL
+	JMP
+)
+
+// Only for use when the tail expression is not a call.
+func genReturn(argp bool, tailp int) []Asm {
+	code := make([]Asm, 0, 2)
+	if argp {
+		code = append(code, newPushAsm())
+	}
+	if tailp != NONTAIL {
+		code = append(code, newReturnAsm())
+	}
+	return code
+		
+}
+
+func compForm(form *Cons, env interface{}, argp bool, tailp int) []Asm {
+	// TODO non-calls!
+	var frameSeq []Asm
+	label := newLabel()
+	if tailp != JMP {
+		frameSeq = gen(newFrameAsm(label))
+	} else {
+		frameSeq = gen()
+	}
+	argsSeq := gen()
+	nargs := 0
+	_ = forEach(form.cdr, func(argForm Value) os.Error {
+		argsSeq = seq(argsSeq, compExp(argForm, env, true, NONTAIL))
+		nargs++
+		return nil
+	})
+	funcSeq := compExp(form.car, env, false, NONTAIL)
+	var shiftSeq []Asm
+	if tailp == JMP {
+		shiftSeq = gen(newShiftAsm())
+	} else {
+		shiftSeq = gen()
+	}
+	applySeq := gen(newApplyAsm(nargs))
+	var labelSeq []Asm
+	if tailp == JMP {
+		labelSeq = gen()
+	} else {
+		labelSeq = gen(label)
+	}
+	var tailSeq []Asm
+	switch tailp {
+	case NONTAIL:
+		if argp {
+			tailSeq = gen(newPushAsm())
+		} else {
+			tailSeq = gen()
+		}
+	case TAIL:
+		tailSeq = gen(newReturnAsm())
+	case JMP:
+		tailSeq = gen()
+	}
+	return seq(
+		frameSeq,
+		argsSeq,
+		funcSeq,
+		shiftSeq,
+		applySeq,
+		labelSeq,
+		tailSeq,
+	)
+}
+
+func compRef(sym *Symbol, env interface{}, argp bool, tailp int) []Asm {
+	// TODO locals!
+	return seq(
+		gen(newGlobalAsm(sym.name)),
+		genReturn(argp, tailp),
+	)
+}
+
+func compConst(exp Value, argp bool, tailp int) []Asm {
+	return seq(
+		gen(newConstAsm(exp)),
+		genReturn(argp, tailp),
+	)
+}
+
+func compExp(exp Value, env interface{}, argp bool, tailp int) []Asm {
+	switch exp := exp.(type) {
+	case *Cons:
+		return compForm(exp, env, argp, tailp)
+	case *Symbol:
+		return compRef(exp, env, argp, tailp)
+	}
+	return compConst(exp, argp, tailp)
+}
+
+func compile(exp Value) (temp *Template, err os.Error) {
+	defer func() {
+		err, _ = recover().(os.Error)
+	}()
+	code := assemble(compExp(exp, nil, false, TAIL))
+	temp = &Template{
 		name: "",
 		nvars: 0,
 		dottedp: false,
 		freeRefs: []FreeRef{},
-		code: []Instr{
-			&frameInstr{5},
-			&constInstr{exp},
-			&pushInstr{},
-			&globalInstr{"write"},
-			&applyInstr{1},
-			&pushInstr{},
-			&globalInstr{"log"},
-			&shiftInstr{},
-			&applyInstr{1},
-		},
+		code: code,
 	}
-	return temp, nil
+	return
 }
 
 /// loading
