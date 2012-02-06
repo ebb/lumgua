@@ -1834,7 +1834,55 @@ func genReturn(argp bool, tailp int) []Asm {
 }
 
 func compForm(form *Cons, env interface{}, argp bool, tailp int) []Asm {
-	// TODO non-calls!
+	head, ok := form.car.(*Symbol)
+	if !ok {
+		return compCall(form, env, argp, tailp)
+	}
+	if head == intern("quote") {
+		cdr, ok := form.cdr.(*Cons)
+		if !ok {
+			panic(os.NewError("compile: ill-formed quote"))
+		}
+		return compConst(cdr.car, argp, tailp)
+	}
+	if head == intern("if") {
+		// TODO
+	}
+	if head == intern("begin") {
+		illFormed := os.NewError("compile: ill-formed begin")
+		tail, ok := form.cdr.(*Cons)
+		if !ok {
+			panic(illFormed)
+		}
+		prefixSeq := gen()
+		for !nilp(tail.cdr) {
+			prefixSeq = seq(
+				prefixSeq,
+				compExp(tail.car, env, false, NONTAIL),
+			)
+			tail, ok = tail.cdr.(*Cons)
+			if !ok {
+				panic(illFormed)
+			}
+		}
+		return seq(
+			prefixSeq,
+			compExp(tail.car, env, argp, tailp),
+		)
+	}
+	if head == intern("jmp") {
+		if tailp == NONTAIL {
+			panic(os.NewError("compile: jmp in non-tail position"))
+		}
+		return compExp(form.cdr, env, argp, JMP)
+	}
+	if head == intern("func") {
+		// TODO
+	}
+	return compCall(form, env, argp, tailp)
+}
+
+func compCall(form *Cons, env interface{}, argp bool, tailp int) []Asm {
 	var frameSeq []Asm
 	label := newLabel()
 	if tailp != JMP {
@@ -1914,7 +1962,13 @@ func compExp(exp Value, env interface{}, argp bool, tailp int) []Asm {
 
 func compile(exp Value) (temp *Template, err os.Error) {
 	defer func() {
-		err, _ = recover().(os.Error)
+		if x := recover(); x != nil {
+			var ok bool
+			err, ok = x.(os.Error)
+			if !ok {
+				panic(x)
+			}
+		}
 	}()
 	code := assemble(compExp(exp, nil, false, TAIL))
 	temp = &Template{
