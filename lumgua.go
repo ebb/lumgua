@@ -1802,6 +1802,14 @@ func newApplyAsm(nargs int) Asm {
 	return &AsmInstr{&applyInstr{nargs}, nil}
 }
 
+func newJumpAsm(label *AsmLabel) Asm {
+	return &AsmInstr{&jumpInstr{-1}, label}
+}
+
+func newFjumpAsm(label *AsmLabel) Asm {
+	return &AsmInstr{&fjumpInstr{-1}, label}
+}
+
 func seq(seqs ...[]Asm) []Asm {
 	code := []Asm{}
 	for _, seq := range seqs {
@@ -1846,7 +1854,39 @@ func compForm(form *Cons, env interface{}, argp bool, tailp int) []Asm {
 		return compConst(cdr.car, argp, tailp)
 	}
 	if head == intern("if") {
-		// TODO
+		label0 := newLabel()
+		label1 := newLabel()
+		var jump1Seq, label1Seq, pushSeq []Asm
+		if tailp == NONTAIL {
+			jump1Seq = gen(newJumpAsm(label1))
+			label1Seq = gen(label1)
+		}
+		if argp {
+			pushSeq = gen(newPushAsm())
+		}
+		subforms := make([]Value, 3)
+		i := 0
+		err := forEach(form.cdr, func(subform Value) os.Error {
+			if i > 2 {
+				return os.NewError("compile: ill-formed if")
+			}
+			subforms[i] = subform
+			i++
+			return nil
+		})
+		if err != nil || i != 3 {
+			panic("compile: ill-formed if")
+		}
+		return seq(
+			compExp(subforms[0], env, false, NONTAIL),
+			gen(newFjumpAsm(label0)),
+			compExp(subforms[1], env, false, tailp),
+			jump1Seq,
+			gen(label0),
+			compExp(subforms[2], env, false, tailp),
+			label1Seq,
+			pushSeq,
+		)
 	}
 	if head == intern("begin") {
 		illFormed := os.NewError("compile: ill-formed begin")
