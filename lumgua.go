@@ -218,6 +218,17 @@ func forEach(x Value, f func(Value) os.Error) os.Error {
 	return nil
 }
 
+func listMap(x Value, f func(Value) Value) Value {
+	switch z := x.(type) {
+	case Nil:
+		return Nil{}
+	case *Cons:
+		return &Cons{f(z.car), listMap(z.cdr, f)}
+	}
+	panic("listMap: unexpected non-list argument")
+	return Nil{}
+}
+
 /// interpreter
 
 const (
@@ -2251,7 +2262,8 @@ func compile(exp Value) (temp *Template, err os.Error) {
 			}
 		}
 	}()
-	code := assemble(compExp(exp, newEmptyEnv(), false, TAIL))
+	coreExp := macroexpandall(exp)
+	code := assemble(compExp(coreExp, newEmptyEnv(), false, TAIL))
 	temp = &Template{
 		name: "",
 		nvars: 0,
@@ -2260,6 +2272,82 @@ func compile(exp Value) (temp *Template, err os.Error) {
 		code: code,
 	}
 	return
+}
+
+func isMacroForm(exp Value) bool {
+	cons, ok := exp.(*Cons)
+	if !ok {
+		return false
+	}
+	head, ok := cons.car.(*Symbol)
+	if !ok {
+		return false
+	}
+	if head == intern("let") {
+		return true
+	}
+	return false
+}
+
+func macroexpand(exp Value) Value {
+	cons := exp.(*Cons)
+	head := cons.car.(*Symbol)
+	if head == intern("let") {
+		bindings := cons.cdr.(*Cons).car
+		body := cons.cdr.(*Cons).cdr
+		vars := listMap(bindings, func(b Value) Value {
+			return b.(*Cons).car
+		})
+		inits := listMap(bindings, func(b Value) Value {
+			return b.(*Cons).cdr.(*Cons).car
+		})
+		return &Cons{
+			&Cons{
+				intern("func"),
+				&Cons{
+					vars,
+					body,
+				},
+			},
+			inits,
+		}
+	}
+	return exp
+}
+
+func macroexpandall(exp Value) Value {
+	for isMacroForm(exp) {
+		exp = macroexpand(exp)
+	}
+	cons, ok := exp.(*Cons)
+	if !ok {
+		return exp
+	}
+	head, ok := cons.car.(*Symbol)
+	if !ok {
+		return listMap(exp, macroexpandall)
+	}
+	if head == intern("quote") {
+		return exp
+	}
+	if head == intern("if") || head == intern("begin") ||
+	   head == intern("jmp") {
+		return &Cons{head, listMap(cons.cdr, macroexpandall)}
+	}
+	if head == intern("func") {
+		tail, ok := cons.cdr.(*Cons)
+		if !ok {
+			panic("macroexpandall: ill-formed func")
+		}
+		return &Cons{
+			head,
+			&Cons{
+				tail.car,
+				listMap(tail.cdr, macroexpandall),
+			},
+		}
+	}
+	return listMap(exp, macroexpandall)
 }
 
 /// loading
