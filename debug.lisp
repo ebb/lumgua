@@ -46,7 +46,9 @@
 			(cellget dict)))))
 
 (define throwfunc
-  (cellnew (func (s) nil)))
+  (cellnew (func (s)
+	     (log s)
+	     (exit 1))))
 
 (define throw
   (func (s)
