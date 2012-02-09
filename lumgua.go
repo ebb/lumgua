@@ -14,6 +14,7 @@ import (
 	"math"
 	"os"
 	"reflect"
+//	"runtime/debug"
 	"strconv"
 	"strings"
 	"time"
@@ -1724,6 +1725,7 @@ func primReadAll(args ...Value) (Value, os.Error) {
 
 // Either an AsmLabel or an AsmInstr.
 type Asm interface {
+	asmVariant()
 }
 
 type AsmLabel struct {
@@ -1734,6 +1736,9 @@ type AsmInstr struct {
 	instr Instr
 	label *AsmLabel // May be nil.
 }
+
+func (asm *AsmLabel) asmVariant() {}
+func (asm *AsmInstr) asmVariant() {}
 
 func (asm *AsmInstr) link(labels map[*AsmLabel]int) Instr {
 	switch instr := asm.instr.(type) {
@@ -1810,6 +1815,18 @@ func newFjumpAsm(label *AsmLabel) Asm {
 	return &AsmInstr{&fjumpInstr{-1}, label}
 }
 
+func newCloseAsm(temp *Template) Asm {
+	return &AsmInstr{&closeInstr{temp}, nil}
+}
+
+func newLocalAsm(i int) Asm {
+	return &AsmInstr{&localInstr{i}, nil}
+}
+
+func newFreeAsm(i int) Asm {
+	return &AsmInstr{&freeInstr{i}, nil}
+}
+
 func seq(seqs ...[]Asm) []Asm {
 	code := []Asm{}
 	for _, seq := range seqs {
@@ -1841,7 +1858,185 @@ func genReturn(argp bool, tailp int) []Asm {
 		
 }
 
-func compForm(form *Cons, env interface{}, argp bool, tailp int) []Asm {
+type CompEnv struct {
+	local, free map[*Symbol]int
+}
+
+func newEmptyEnv() *CompEnv {
+	return &CompEnv{
+		local: make(map[*Symbol]int),
+		free:  make(map[*Symbol]int),
+	}
+}
+
+func (env *CompEnv) symbolSet() *SymbolSet {
+	local := make([]*Symbol, len(env.local))
+	free := make([]*Symbol, len(env.free))
+	for sym, i := range env.local {
+		local[i] = sym
+	}
+	for sym, i := range env.free {
+		free[i] = sym
+	}
+	return newSymbolSet(local, free)
+}
+
+type SymbolSet struct {
+	table map[*Symbol]bool
+}
+
+func newSymbolSet(lists ...[]*Symbol) *SymbolSet {
+	table := make(map[*Symbol]bool)
+	for _, list := range lists {
+		for _, sym := range list {
+			table[sym] = true
+		}
+	}
+	return &SymbolSet{table}
+}
+
+func (set *SymbolSet) contains(sym *Symbol) bool {
+	_, ok := set.table[sym]
+	return ok
+}
+
+func (set *SymbolSet) include(sym *Symbol) {
+	set.table[sym] = true
+}
+
+func (set1 *SymbolSet) union(set2 *SymbolSet) *SymbolSet {
+	u := newSymbolSet()
+	for sym, _ := range set1.table {
+		u.include(sym)
+	}
+	for sym, _ := range set2.table {
+		u.include(sym)
+	}
+	return u
+}
+
+func (set1 *SymbolSet) minus(set2 *SymbolSet) *SymbolSet {
+	acc := newSymbolSet()
+	for sym, _ := range set1.table {
+		if !set2.contains(sym) {
+			acc.include(sym)
+		}
+	}
+	return acc
+}
+
+func analyzeVars(varSpec Value) ([]*Symbol, int, bool) {
+	tail := varSpec
+	vars := []*Symbol{}
+	nvars := 0
+	var dottedp bool
+loop:	for {
+		switch x := tail.(type) {
+		case *Cons:
+			sym, ok := x.car.(*Symbol)
+			if !ok {
+				panic("compile: bad variable name")
+			}
+			vars = append(vars, sym)
+			nvars++
+			tail = x.cdr
+		case Nil:
+			dottedp = false
+			break loop
+		default:
+			sym, ok := x.(*Symbol)
+			if !ok {
+				panic("compile: bad variable name")
+			}
+			vars = append(vars, sym)
+			nvars++
+			dottedp = true
+			break loop
+		}
+	}
+	return vars, nvars, dottedp
+}
+
+func collectFree(exps *Cons, b, p *SymbolSet) *SymbolSet {
+	refs := newSymbolSet()
+	_ = forEach(exps, func(exp Value) os.Error {
+		subset := findFree(exp, b, p)
+		refs = refs.union(subset)
+		return nil
+	})
+	return refs
+}
+
+func findFree(exp Value, b, p *SymbolSet) *SymbolSet {
+	switch exp := exp.(type) {
+	case *Symbol:
+		if b.contains(exp) && !p.contains(exp) {
+			return newSymbolSet([]*Symbol{exp})
+		}
+		return newSymbolSet()
+	case *Cons:
+		head := exp.car
+		if nilp(exp.cdr) {
+			return findFree(head, b, p)
+		}
+		tail, ok := exp.cdr.(*Cons)
+		if !ok {
+			panic("compile: ill-formed expression")
+		}
+		sym, ok := head.(*Symbol)
+		if !ok {
+			return collectFree(exp, b, p)
+		}
+		if sym == intern("quote") {
+			return newSymbolSet()
+		}
+		if sym == intern("if") || sym == intern("jmp") ||
+		   sym == intern("begin") {
+			return collectFree(tail, b, p)
+		}
+		if sym == intern("func") {
+			vars, _, _ := analyzeVars(tail.car)
+			body, ok := tail.cdr.(*Cons)
+			if !ok {
+				panic("compile: ill-formed func")
+			}
+			s := collectFree(body, b, newSymbolSet(vars))
+			return s.minus(p)
+		}
+		return collectFree(exp, b, p)
+	}
+	return newSymbolSet()
+}
+
+func analyzeRefs(env *CompEnv, locals []*Symbol, body *Cons) (*CompEnv, []FreeRef) {
+	freshEnv := newEmptyEnv()
+	freeRefs := []FreeRef{}
+	refs := collectFree(body, env.symbolSet(), newSymbolSet(locals))
+	nfree := 0
+	for i, sym := range locals {
+		freshEnv.local[sym] = i
+	}
+	for ref, _ := range refs.table {
+		if _, ok := freshEnv.local[ref]; ok {
+			continue
+		}
+		if i, ok := env.local[ref]; ok {
+			freeRefs = append(freeRefs, FreeRef{LOCAL, i})
+			freshEnv.free[ref] = nfree
+			nfree++
+			continue
+		}
+		if i, ok := env.free[ref]; ok {
+			freeRefs = append(freeRefs, FreeRef{FREE, i})
+			freshEnv.free[ref] = nfree
+			nfree++
+			continue
+		}
+	}
+	return freshEnv, freeRefs
+}
+
+func compForm(form *Cons, env *CompEnv, argp bool, tailp int) []Asm {
 	head, ok := form.car.(*Symbol)
 	if !ok {
 		return compCall(form, env, argp, tailp)
@@ -1917,12 +2112,35 @@ func compForm(form *Cons, env interface{}, argp bool, tailp int) []Asm {
 		return compExp(form.cdr, env, argp, JMP)
 	}
 	if head == intern("func") {
-		// TODO
+		illFormed := os.NewError("compile: ill-formed func")
+		tail, ok := form.cdr.(*Cons)
+		if !ok {
+			panic(illFormed)
+		}
+		vars := tail.car
+		body := &Cons{intern("begin"), tail.cdr}
+		properVars, nvars, dottedp := analyzeVars(vars)
+		funcEnv, freeRefs := analyzeRefs(env, properVars, body)
+		code := assemble(compExp(body, funcEnv, false, TAIL))
+		for _, instr := range code {
+			fmt.Fprintf(os.Stderr, "temp: %#v\n", instr)
+		}
+		temp := &Template{
+			name: "",
+			nvars: nvars,
+			dottedp: dottedp,
+			freeRefs: freeRefs,
+			code: code,
+		}
+		return seq(
+			gen(newCloseAsm(temp)),
+			genReturn(argp, tailp),
+		)
 	}
 	return compCall(form, env, argp, tailp)
 }
 
-func compCall(form *Cons, env interface{}, argp bool, tailp int) []Asm {
+func compCall(form *Cons, env *CompEnv, argp bool, tailp int) []Asm {
 	var frameSeq []Asm
 	label := newLabel()
 	if tailp != JMP {
@@ -1975,8 +2193,19 @@ func compCall(form *Cons, env interface{}, argp bool, tailp int) []Asm {
 	)
 }
 
-func compRef(sym *Symbol, env interface{}, argp bool, tailp int) []Asm {
-	// TODO locals!
+func compRef(sym *Symbol, env *CompEnv, argp bool, tailp int) []Asm {
+	if i, ok := env.local[sym]; ok {
+		return seq(
+			gen(newLocalAsm(i)),
+			genReturn(argp, tailp),
+		)
+	}
+	if i, ok := env.free[sym]; ok {
+		return seq(
+			gen(newFreeAsm(i)),
+			genReturn(argp, tailp),
+		)
+	}
 	return seq(
 		gen(newGlobalAsm(sym.name)),
 		genReturn(argp, tailp),
@@ -1990,7 +2219,7 @@ func compConst(exp Value, argp bool, tailp int) []Asm {
 	)
 }
 
-func compExp(exp Value, env interface{}, argp bool, tailp int) []Asm {
+func compExp(exp Value, env *CompEnv, argp bool, tailp int) []Asm {
 	switch exp := exp.(type) {
 	case *Cons:
 		return compForm(exp, env, argp, tailp)
@@ -2010,7 +2239,7 @@ func compile(exp Value) (temp *Template, err os.Error) {
 			}
 		}
 	}()
-	code := assemble(compExp(exp, nil, false, TAIL))
+	code := assemble(compExp(exp, newEmptyEnv(), false, TAIL))
 	temp = &Template{
 		name: "",
 		nvars: 0,
