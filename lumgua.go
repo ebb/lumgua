@@ -1385,6 +1385,13 @@ func primExit(args ...Value) (Value, os.Error) {
 	return nil, os.NewError("exit: failed to exit!")
 }
 
+func primCompile(args ...Value) (Value, os.Error) {
+	if len(args) != 1 {
+		return nil, os.NewError("compile: bad argument list")
+	}
+	return compile(args[0])
+}
+
 var primDecls = [][]interface{}{
 	{"symbolp x", primSymbolp},
 	{"numberp x", primNumberp},
@@ -1437,6 +1444,7 @@ var primDecls = [][]interface{}{
 	{"exec cmd . args", primExec},
 	{"exit code", primExit},
 	{"primreadall s", primReadAll},
+	{"primcompile exp", primCompile},
 }
 
 func define(name string, value Value) {
@@ -2109,7 +2117,11 @@ func compForm(form *Cons, env *CompEnv, argp bool, tailp int) []Asm {
 		if tailp == NONTAIL {
 			panic(os.NewError("compile: jmp in non-tail position"))
 		}
-		return compExp(form.cdr, env, argp, JMP)
+		tail, ok := form.cdr.(*Cons)
+		if !ok {
+			panic(os.NewError("compile: ill-formed jmp"))
+		}
+		return compExp(tail.car, env, argp, JMP)
 	}
 	if head == intern("func") {
 		illFormed := os.NewError("compile: ill-formed func")
