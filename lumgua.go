@@ -1686,6 +1686,71 @@ loop:	for {
 	return list(exps...), nil
 }
 
+type Literal interface {
+	literalVariant()
+}
+
+type ConsLit struct {
+	car Literal
+	cdr Literal
+}
+
+func (_ Number) literalVariant() {}
+func (_ String) literalVariant() {}
+func (_ *Symbol) literalVariant() {}
+func (_ *ConsLit) literalVariant() {}
+
+type Binding struct {
+	name *Symbol
+}
+
+type BindingPair struct {
+	binding *Binding
+	expr    Expr
+}
+
+type Expr interface {
+	exprVariant()
+}
+
+type LetExpr struct {
+	inits []BindingPair
+	body  []Expr
+}
+
+type QuoteExpr struct {
+	lit Literal
+}
+
+type IfExpr struct {
+	cond     Expr
+	thenExpr Expr
+	elseExpr Expr
+}
+
+type BeginExpr struct {
+	body []Expr
+}
+
+type JmpExpr struct {
+	expr Expr
+}
+
+type FuncExpr struct {
+	params []*Binding
+	dotted bool
+	body   []Expr
+}
+
+func (_ LetExpr) exprVariant() {}
+func (_ QuoteExpr) exprVariant() {}
+func (_ IfExpr) exprVariant() {}
+func (_ BeginExpr) exprVariant() {}
+func (_ JmpExpr) exprVariant() {}
+func (_ FuncExpr) exprVariant() {}
+
+// TODO - func read(buf io.ByteScanner) (Expr, os.Error)
+
 func read(buf io.ByteScanner) (Value, os.Error) {
 	skipws(buf)
 	b, err := buf.ReadByte()
