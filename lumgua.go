@@ -1546,7 +1546,7 @@ func skipws(buf io.ByteScanner) {
 	}
 }
 
-func readAtom(buf io.ByteScanner) Value {
+func readAtom(buf io.ByteScanner) Literal {
 	atomBuf := []byte{}
 loop:	for {
 		b, err := buf.ReadByte()
@@ -1574,17 +1574,17 @@ loop:	for {
 	return intern(atom)
 }
 
-func readQuote(buf io.ByteScanner) Value {
+func readQuote(buf io.ByteScanner) Literal {
 	x := read(buf)
-	return list(intern("quote"), x)
+	return newListLiteral(false, intern("quote"), x)
 }
 
-func readQuasi(buf io.ByteScanner) Value {
+func readQuasi(buf io.ByteScanner) Literal {
 	x := read(buf)
-	return list(intern("quasiquote"), x)
+	return newListLiteral(false, intern("quasiquote"), x)
 }
 
-func readComma(buf io.ByteScanner) Value {
+func readComma(buf io.ByteScanner) Literal {
 	b, err := buf.ReadByte()
 	if err != nil {
 		panic("read: incomplete comma")
@@ -1596,10 +1596,10 @@ func readComma(buf io.ByteScanner) Value {
 		buf.UnreadByte()
 	}
 	x := read(buf)
-	return list(tag, x)
+	return newListLiteral(false, tag, x)
 }
 
-func readString(buf io.ByteScanner) Value {
+func readString(buf io.ByteScanner) Literal {
 	strbuf := []byte{}
 loop:	for {
 		b, err := buf.ReadByte()
@@ -1634,10 +1634,10 @@ loop:	for {
 	return String("")
 }
 
-func readList(buf io.ByteScanner) Value {
+func readList(buf io.ByteScanner) Literal {
 	skipws(buf)
 	dotted := false
-	items := []Value{}
+	items := []Literal{}
 	for {
 		b, err := buf.ReadByte()
 		if err != nil {
@@ -1667,26 +1667,16 @@ func readList(buf io.ByteScanner) Value {
 		items = append(items, read(buf))
 		skipws(buf)
 	}
-	z := Value(Nil{})
-	i := len(items)
-	if dotted {
-		i--
-		z = items[i]
-	}
-	for i > 0 {
-		i--
-		z = &Cons{items[i], z}
-	}
-	return z
+	return newListLiteral(dotted, items...)
 }
 
-func read(buf io.ByteScanner) Value {
+func read(buf io.ByteScanner) Literal {
 	skipws(buf)
 	b, err := buf.ReadByte()
 	if err != nil {
 		panic("read: premature end of file")
 	}
-	var reader func (io.ByteScanner) Value
+	var reader func (io.ByteScanner) Literal
 	switch b {
 	case '`':
 		reader = readQuasi
@@ -1707,6 +1697,43 @@ func read(buf io.ByteScanner) Value {
 	buf.UnreadByte()
 	return readAtom(buf)
 }
+
+func valueOfLiteral(lit Literal) Value {
+	if x, ok := lit.(*ListLiteral); ok {
+		z := Value(Nil{})
+		i := len(x.items)
+		if x.dotted {
+			i--
+			z = valueOfLiteral(x.items[i])
+		}
+		for i > 0 {
+			i--
+			z = &Cons{valueOfLiteral(x.items[i]), z}
+		}
+		return z
+	}
+	return lit
+}
+
+type Literal interface {
+	literalVariant()
+}
+
+type ListLiteral struct {
+	dotted bool
+	items  []Literal
+}
+
+func newListLiteral(dotted bool, items ...Literal) *ListLiteral {
+	return &ListLiteral{dotted, items}
+}
+
+func (_ Nil) literalVariant() {}
+func (_ Number) literalVariant() {}
+func (_ String) literalVariant() {}
+func (_ *Symbol) literalVariant() {}
+func (_ *ListLiteral) literalVariant() {}
+
 
 /*
 type Binding struct {
@@ -1790,7 +1817,7 @@ func primReadAll(args ...Value) (val Value, err os.Error) {
 		if buf.Len() == 0 {
 			break
 		}
-		exp := read(buf)
+		exp := valueOfLiteral(read(buf))
 		exps = append(exps, exp)
 	}
 	return list(exps...), nil
