@@ -14,7 +14,7 @@ import (
 	"math"
 	"os"
 	"reflect"
-//	"runtime/debug"
+	//	"runtime/debug"
 	"strconv"
 	"strings"
 	"time"
@@ -1231,7 +1231,7 @@ func primDef(args ...Value) (Value, os.Error) {
 	if ok {
 		return nil, os.NewError(
 			"def: multiple definitions for " +
-			name,
+				name,
 		)
 	}
 	globals[name] = &Binding{args[1]}
@@ -1288,7 +1288,7 @@ func httpPut(rawURL string, body string) os.Error {
 				},
 			},
 		),
-		Host:    bakedURL.Host,
+		Host: bakedURL.Host,
 		Body: stringBody{
 			strings.NewReader(body),
 		},
@@ -1364,7 +1364,7 @@ func primExec(args ...Value) (Value, os.Error) {
 	}
 	cmdname := string(s)
 	cmdargs := make([]string, 0)
-	err = forEach(args[1], func (arg Value) os.Error {
+	err = forEach(args[1], func(arg Value) os.Error {
 		s, ok = arg.(String)
 		if !ok {
 			return os.NewError("exec: bad argument")
@@ -1548,7 +1548,8 @@ func skipws(buf io.ByteScanner) {
 
 func readAtom(buf io.ByteScanner) Literal {
 	atomBuf := []byte{}
-loop:	for {
+loop:
+	for {
 		b, err := buf.ReadByte()
 		if err != nil {
 			break
@@ -1601,7 +1602,8 @@ func readComma(buf io.ByteScanner) Literal {
 
 func readString(buf io.ByteScanner) Literal {
 	strbuf := []byte{}
-loop:	for {
+loop:
+	for {
 		b, err := buf.ReadByte()
 		if err != nil {
 			break
@@ -1676,7 +1678,7 @@ func read(buf io.ByteScanner) Literal {
 	if err != nil {
 		panic("read: premature end of file")
 	}
-	var reader func (io.ByteScanner) Literal
+	var reader func(io.ByteScanner) Literal
 	switch b {
 	case '`':
 		reader = readQuasi
@@ -1728,10 +1730,10 @@ func newListLiteral(dotted bool, items ...Literal) *ListLiteral {
 	return &ListLiteral{dotted, items}
 }
 
-func (_ Nil) literalVariant() {}
-func (_ Number) literalVariant() {}
-func (_ String) literalVariant() {}
-func (_ *Symbol) literalVariant() {}
+func (_ Nil) literalVariant()          {}
+func (_ Number) literalVariant()       {}
+func (_ String) literalVariant()       {}
+func (_ *Symbol) literalVariant()      {}
 func (_ *ListLiteral) literalVariant() {}
 
 func parseCallExpr(form *ListLiteral) Expr {
@@ -1913,14 +1915,14 @@ type CallExpr struct {
 	argExprs []Expr
 }
 
-func (_ LetExpr) exprVariant() {}
-func (_ RefExpr) exprVariant() {}
+func (_ LetExpr) exprVariant()   {}
+func (_ RefExpr) exprVariant()   {}
 func (_ QuoteExpr) exprVariant() {}
-func (_ IfExpr) exprVariant() {}
+func (_ IfExpr) exprVariant()    {}
 func (_ BeginExpr) exprVariant() {}
-func (_ JmpExpr) exprVariant() {}
-func (_ FuncExpr) exprVariant() {}
-func (_ CallExpr) exprVariant() {}
+func (_ JmpExpr) exprVariant()   {}
+func (_ FuncExpr) exprVariant()  {}
+func (_ CallExpr) exprVariant()  {}
 
 func primReadAll(args ...Value) (val Value, err os.Error) {
 	if len(args) != 1 || !stringp(args[0]) {
@@ -2084,7 +2086,7 @@ func genReturn(argp bool, tailp int) []Asm {
 		code = append(code, newReturnAsm())
 	}
 	return code
-		
+
 }
 
 type CompEnv struct {
@@ -2159,7 +2161,8 @@ func analyzeVars(varSpec Value) ([]*Symbol, int, bool) {
 	vars := []*Symbol{}
 	nvars := 0
 	var dottedp bool
-loop:	for {
+loop:
+	for {
 		switch x := tail.(type) {
 		case *Cons:
 			sym, ok := x.car.(*Symbol)
@@ -2220,7 +2223,7 @@ func findFree(exp Value, b, p *SymbolSet) *SymbolSet {
 			return newSymbolSet()
 		}
 		if sym == intern("if") || sym == intern("jmp") ||
-		   sym == intern("begin") {
+			sym == intern("begin") {
 			return collectFree(tail, b, p)
 		}
 		if sym == intern("func") {
@@ -2359,11 +2362,11 @@ func compForm(form *Cons, env *CompEnv, argp bool, tailp int) []Asm {
 			fmt.Fprintf(os.Stderr, "temp: %#v\n", instr)
 		}
 		temp := &Template{
-			name: "",
-			nvars: nvars,
-			dottedp: dottedp,
+			name:     "",
+			nvars:    nvars,
+			dottedp:  dottedp,
 			freeRefs: freeRefs,
-			code: code,
+			code:     code,
 		}
 		return seq(
 			gen(newCloseAsm(temp)),
@@ -2475,11 +2478,11 @@ func compile(exp Value) (temp *Template, err os.Error) {
 	coreExp := macroexpandall(exp)
 	code := assemble(compExp(coreExp, newEmptyEnv(), false, TAIL))
 	temp = &Template{
-		name: "",
-		nvars: 0,
-		dottedp: false,
+		name:     "",
+		nvars:    0,
+		dottedp:  false,
 		freeRefs: []FreeRef{},
-		code: code,
+		code:     code,
 	}
 	return
 }
@@ -2541,7 +2544,7 @@ func macroexpandall(exp Value) Value {
 		return exp
 	}
 	if head == intern("if") || head == intern("begin") ||
-	   head == intern("jmp") {
+		head == intern("jmp") {
 		return &Cons{head, listMap(cons.cdr, macroexpandall)}
 	}
 	if head == intern("func") {
