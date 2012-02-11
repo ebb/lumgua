@@ -1734,15 +1734,141 @@ func (_ String) literalVariant() {}
 func (_ *Symbol) literalVariant() {}
 func (_ *ListLiteral) literalVariant() {}
 
-
-/*
-type Binding struct {
-	name *Symbol
+func parseCallExpr(form *ListLiteral) Expr {
+	if form.dotted {
+		panic("parseExpr: ill-formed call")
+	}
+	forms := form.items
+	if len(forms) < 1 {
+		panic("parseExpr: empty call")
+	}
+	funcExpr := parseExpr(forms[0])
+	argExprs := parseEach(forms[1:])
+	return CallExpr{funcExpr, argExprs}
 }
 
-type BindingPair struct {
-	binding *Binding
-	expr    Expr
+func parseParams(lit Literal) ([]*Symbol, bool) {
+	switch x := lit.(type) {
+	case *Symbol:
+		return []*Symbol{x}, true
+	case *ListLiteral:
+		params := make([]*Symbol, len(x.items))
+		for i, item := range x.items {
+			var ok bool
+			params[i], ok = item.(*Symbol)
+			if !ok {
+				panic("parseExpr: bad parameter")
+			}
+		}
+		return params, x.dotted
+	}
+	panic("parseExpr: ill-formed parameter list")
+	return []*Symbol{}, false
+}
+
+func parseInits(lit Literal) []InitPair {
+	list, ok := lit.(*ListLiteral)
+	if !ok || list.dotted || len(list.items) == 0 {
+		panic("parseExpr: ill-formed init list")
+	}
+	inits := make([]InitPair, len(list.items))
+	for i, item := range list.items {
+		pair, ok := item.(*ListLiteral)
+		if !ok || pair.dotted || len(pair.items) != 2 {
+			panic("parseExpr: ill-formed init list")
+		}
+		inits[i].name, ok = pair.items[0].(*Symbol)
+		if !ok {
+			panic("parseExpr: ill-formed init list")
+		}
+		inits[i].expr = parseExpr(pair.items[1])
+	}
+	return inits
+}
+
+func parseEach(forms []Literal) []Expr {
+	exprs := make([]Expr, len(forms))
+	for i, form := range forms {
+		exprs[i] = parseExpr(form)
+	}
+	return exprs
+}
+
+func parseExpr(lit Literal) Expr {
+	switch x := lit.(type) {
+	case Nil:
+		return QuoteExpr{x}
+	case Number:
+		return QuoteExpr{x}
+	case String:
+		return QuoteExpr{x}
+	case *Symbol:
+		return RefExpr{x}
+	case *ListLiteral:
+		if x.dotted {
+			panic("parseExpr: dotted list fail")
+		}
+		if len(x.items) == 0 {
+			panic("parseExpr: empty expression")
+		}
+		head, ok := x.items[0].(*Symbol)
+		if !ok {
+			return parseCallExpr(x)
+		}
+		if head == intern("quote") {
+			if len(x.items) != 2 {
+				panic("parseExpr: ill-formed quote")
+			}
+			return QuoteExpr{valueOfLiteral(x.items[1])}
+		}
+		if head == intern("if") {
+			if len(x.items) != 4 {
+				panic("parseExpr: ill-formed if")
+			}
+			return IfExpr{
+				parseExpr(x.items[1]),
+				parseExpr(x.items[2]),
+				parseExpr(x.items[3]),
+			}
+		}
+		if head == intern("begin") {
+			if len(x.items) < 2 {
+				panic("parseExpr: ill-formed begin")
+			}
+			body := parseEach(x.items[1:])
+			return BeginExpr{body}
+		}
+		if head == intern("jmp") {
+			if len(x.items) != 2 {
+				panic("parseExpr: ill-formed jmp")
+			}
+			return JmpExpr{parseExpr(x.items[1])}
+		}
+		if head == intern("func") {
+			if len(x.items) < 3 {
+				panic("parseExpr: ill-formed func")
+			}
+			params, dotted := parseParams(x.items[1])
+			body := parseEach(x.items[1:])
+			return FuncExpr{params, dotted, body}
+		}
+		if head == intern("let") {
+			if len(x.items) < 3 {
+				panic("parseExpr: ill-formed let")
+			}
+			inits := parseInits(x.items[1])
+			body := parseEach(x.items[1:])
+			return LetExpr{inits, body}
+		}
+		return parseCallExpr(x)
+	}
+	panic("parseExpr: unmatched literal")
+	return QuoteExpr{Nil{}}
+}
+
+type InitPair struct {
+	name *Symbol
+	expr Expr
 }
 
 type Expr interface {
@@ -1750,16 +1876,16 @@ type Expr interface {
 }
 
 type LetExpr struct {
-	inits []BindingPair
+	inits []InitPair
 	body  []Expr
 }
 
 type RefExpr struct {
-	binding *Binding
+	name *Symbol
 }
 
 type QuoteExpr struct {
-	lit Literal
+	x Value
 }
 
 type IfExpr struct {
@@ -1777,7 +1903,7 @@ type JmpExpr struct {
 }
 
 type FuncExpr struct {
-	params []*Binding
+	params []*Symbol
 	dotted bool
 	body   []Expr
 }
@@ -1788,12 +1914,13 @@ type CallExpr struct {
 }
 
 func (_ LetExpr) exprVariant() {}
+func (_ RefExpr) exprVariant() {}
 func (_ QuoteExpr) exprVariant() {}
 func (_ IfExpr) exprVariant() {}
 func (_ BeginExpr) exprVariant() {}
 func (_ JmpExpr) exprVariant() {}
 func (_ FuncExpr) exprVariant() {}
-*/
+func (_ CallExpr) exprVariant() {}
 
 func primReadAll(args ...Value) (val Value, err os.Error) {
 	if len(args) != 1 || !stringp(args[0]) {
