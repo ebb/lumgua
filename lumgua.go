@@ -33,6 +33,8 @@ var faslDict map[string]FaslCombiner
 
 var symbolTable map[string]*Symbol
 
+var readTable map[byte]func(io.ByteScanner) Literal
+
 /// lisp types
 
 type Value interface{}
@@ -1678,22 +1680,10 @@ func read(buf io.ByteScanner) Literal {
 	if err != nil {
 		panic("read: premature end of file")
 	}
-	var reader func(io.ByteScanner) Literal
-	switch b {
-	case '`':
-		reader = readQuasi
-	case ',':
-		reader = readComma
-	case '(':
-		reader = readList
-	case '\'':
-		reader = readQuote
-	case '"':
-		reader = readString
-	case ')':
+	if b == ')' {
 		panic("read: unmatched close-parenthesis")
 	}
-	if reader != nil {
+	if reader, ok := readTable[b]; ok {
 		return reader(buf)
 	}
 	buf.UnreadByte()
@@ -2880,6 +2870,16 @@ func loadSourceFile(name string) {
 	m.run()
 }
 
+func initReader() {
+	readTable = map[byte]func(io.ByteScanner) Literal{
+		'"': readString,
+		'\'': readQuote,
+		'`': readQuasi,
+		',': readComma,
+		'(': readList,
+	}
+}
+
 func initLoader() {
 	faslDict = map[string]FaslCombiner{
 		"string":   parseString,
@@ -2898,6 +2898,7 @@ func initInterpreter() {
 }
 
 func init() {
+	initReader()
 	initLoader()
 	initInterpreter()
 }
