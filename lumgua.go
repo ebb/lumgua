@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"bytes"
 	"container/vector"
 	"exec"
 	"flag"
@@ -1450,7 +1449,6 @@ var primDecls = [][]interface{}{
 	{"now", primNow},
 	{"exec cmd . args", primExec},
 	{"exit code", primExit},
-	{"primreadall s", primReadAll},
 }
 
 func define(name string, value Value) {
@@ -1940,34 +1938,6 @@ func (expr LetExpr) expand() Expr {
 		FuncExpr{params, false, expr.body},
 		argExprs,
 	}
-}
-
-func primReadAll(args ...Value) (val Value, err os.Error) {
-	if len(args) != 1 || !stringp(args[0]) {
-		return Nil{}, os.NewError("readall: type error")
-	}
-	s := string(args[0].(String))
-	buf := bytes.NewBufferString(s)
-	exps := make([]Value, 0, 256)
-	defer func() {
-		x := recover()
-		if s, ok := x.(string); ok {
-			val, err = Nil{}, os.NewError(s)
-			return
-		}
-		if x != nil {
-			panic(x)
-		}
-	}()
-	for {
-		skipws(buf)
-		if buf.Len() == 0 {
-			break
-		}
-		exp := valueOfLiteral(read(buf))
-		exps = append(exps, exp)
-	}
-	return list(exps...), nil
 }
 
 /// compiler
