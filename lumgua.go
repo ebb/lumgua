@@ -1792,6 +1792,17 @@ func parseEach(forms []Literal) []Expr {
 	return exprs
 }
 
+func parseCondClause(form Literal) CondClause {
+	list, ok := form.(*ListLiteral)
+	if !ok || list.dotted || len(list.items) != 2 {
+		panic("parseExpr: ill-formed cond clause")
+	}
+	return CondClause{
+		parseExpr(list.items[0]),
+		parseExpr(list.items[1]),
+	}
+}
+
 func parseExpr(lit Literal) Expr {
 	switch x := lit.(type) {
 	case Nil:
@@ -1858,24 +1869,37 @@ func parseExpr(lit Literal) Expr {
 			body := parseEach(x.items[2:])
 			return LetExpr{inits, body}
 		}
+		if head == intern("define") {
+			if len(x.items) != 3 {
+				panic("parseExpr: ill-formed define")
+			}
+			sym, ok := x.items[1].(*Symbol)
+			if !ok {
+				panic("parseExpr: ill-formed define")
+			}
+			return DefineExpr{sym, parseExpr(x.items[2])}
+		}
+		if head == intern("cond") {
+			clauses := make([]CondClause, len(x.items[1:]))
+			for i, item := range x.items[1:] {
+				clauses[i] = parseCondClause(item)
+			}
+			return CondExpr{clauses}
+		}
+		if head == intern("and") {
+			return AndExpr{parseEach(x.items[1:])}
+		}
+		if head == intern("or") {
+			return OrExpr{parseEach(x.items[1:])}
+		}
 		return parseCallExpr(x)
 	}
 	panic("parseExpr: unmatched literal")
 	return QuoteExpr{Nil{}}
 }
 
-type InitPair struct {
-	name *Symbol
-	expr Expr
-}
-
 type Expr interface {
 	exprVariant()
-}
-
-type LetExpr struct {
-	inits []InitPair
-	body  []Expr
 }
 
 type RefExpr struct {
@@ -1911,7 +1935,66 @@ type CallExpr struct {
 	argExprs []Expr
 }
 
+type InitPair struct {
+	name *Symbol
+	expr Expr
+}
+
+type LetExpr struct {
+	inits []InitPair
+	body  []Expr
+}
+
+type DefineExpr struct {
+	name *Symbol
+	expr Expr
+}
+
+type CondClause struct {
+	condExpr Expr
+	thenExpr Expr
+}
+
+type CondExpr struct {
+	clauses []CondClause
+}
+
+type AndExpr struct {
+	exprs []Expr
+}
+
+type OrExpr struct {
+	exprs []Expr
+}
+
+type MatchClause struct {
+	tag *Symbol
+	params []*Symbol
+	dotted bool
+	body []Expr
+}
+
+type MatcherExpr struct {
+	clauses []MatchClause
+}
+
+type MatchExpr struct {
+	x Expr
+	clauses []MatchClause
+}
+
+type QuasiExpr struct {
+	expr Expr
+}
+
 func (_ LetExpr) exprVariant()   {}
+func (_ DefineExpr) exprVariant() {}
+func (_ CondExpr) exprVariant() {}
+func (_ AndExpr) exprVariant() {}
+func (_ OrExpr) exprVariant() {}
+func (_ MatcherExpr) exprVariant() {}
+func (_ MatchExpr) exprVariant() {}
+func (_ QuasiExpr) exprVariant() {}
 func (_ RefExpr) exprVariant()   {}
 func (_ QuoteExpr) exprVariant() {}
 func (_ IfExpr) exprVariant()    {}
@@ -1926,6 +2009,13 @@ type MacroExpr interface {
 }
 
 func (_ LetExpr) macroExprVariant() {}
+func (_ DefineExpr) macroExprVariant() {}
+func (_ CondExpr) macroExprVariant() {}
+func (_ AndExpr) macroExprVariant() {}
+func (_ OrExpr) macroExprVariant() {}
+func (_ MatcherExpr) macroExprVariant() {}
+func (_ MatchExpr) macroExprVariant() {}
+func (_ QuasiExpr) macroExprVariant() {}
 
 func (expr LetExpr) expand() Expr {
 	params := make([]*Symbol, len(expr.inits))
@@ -1938,6 +2028,50 @@ func (expr LetExpr) expand() Expr {
 		FuncExpr{params, false, expr.body},
 		argExprs,
 	}
+}
+
+func (expr DefineExpr) expand() Expr {
+	return CallExpr{
+		RefExpr{intern("def")},
+		[]Expr{QuoteExpr{expr.name}, expr.expr},
+	}
+}
+
+func (expr CondExpr) expand() Expr {
+	acc := Expr(QuoteExpr{Nil{}})
+	clauses := expr.clauses
+	for i := len(clauses) - 1; i >= 0; i-- {
+		acc = IfExpr{
+			clauses[i].condExpr,
+			clauses[i].thenExpr,
+			acc,
+		}
+	}
+	return acc
+}
+
+func (expr AndExpr) expand() Expr {
+	acc := Expr(RefExpr{intern("t")})
+	for i := len(expr.exprs) - 1; i >= 0; i-- {
+		acc = IfExpr{
+			expr.exprs[i],
+			acc,
+			QuoteExpr{Nil{}},
+		}
+	}
+	return acc
+}
+
+func (expr OrExpr) expand() Expr {
+	acc := Expr(QuoteExpr{Nil{}})
+	for i := len(expr.exprs) - 1; i >= 0; i-- {
+		acc = IfExpr{
+			expr.exprs[i],
+			RefExpr{intern("t")},
+			acc,
+		}
+	}
+	return acc
 }
 
 /// compiler
@@ -2342,7 +2476,11 @@ func compile(expr Expr) (temp *Template, err os.Error) {
 }
 
 func macroexpandall(expr Expr) Expr {
-	if macro, ok := expr.(MacroExpr); ok {
+	for {
+		macro, ok := expr.(MacroExpr)
+		if !ok {
+			break
+		}
 		expr = macro.expand()
 	}
 	switch core := expr.(type) {
