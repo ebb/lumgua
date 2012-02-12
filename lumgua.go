@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"container/vector"
 	"exec"
@@ -1398,13 +1399,6 @@ func primExit(args ...Value) (Value, os.Error) {
 	return nil, os.NewError("exit: failed to exit!")
 }
 
-func primCompile(args ...Value) (Value, os.Error) {
-	if len(args) != 1 {
-		return nil, os.NewError("compile: bad argument list")
-	}
-	return compile(args[0])
-}
-
 var primDecls = [][]interface{}{
 	{"symbolp x", primSymbolp},
 	{"numberp x", primNumberp},
@@ -1457,7 +1451,6 @@ var primDecls = [][]interface{}{
 	{"exec cmd . args", primExec},
 	{"exit code", primExit},
 	{"primreadall s", primReadAll},
-	{"primcompile exp", primCompile},
 }
 
 func define(name string, value Value) {
@@ -1690,6 +1683,21 @@ func read(buf io.ByteScanner) Literal {
 	return readAtom(buf)
 }
 
+func newReadAll(r io.Reader) []Literal {
+	buf := bufio.NewReader(r)
+	items := []Literal{}
+	for {
+		skipws(buf)
+		if _, err := buf.ReadByte(); err != nil {
+			break
+		}
+		_ = buf.UnreadByte()
+		item := read(buf)
+		items = append(items, item)
+	}
+	return items
+}
+
 func valueOfLiteral(lit Literal) Value {
 	if x, ok := lit.(*ListLiteral); ok {
 		z := Value(Nil{})
@@ -1841,7 +1849,7 @@ func parseExpr(lit Literal) Expr {
 				panic("parseExpr: ill-formed func")
 			}
 			params, dotted := parseParams(x.items[1])
-			body := parseEach(x.items[1:])
+			body := parseEach(x.items[2:])
 			return FuncExpr{params, dotted, body}
 		}
 		if head == intern("let") {
@@ -1849,7 +1857,7 @@ func parseExpr(lit Literal) Expr {
 				panic("parseExpr: ill-formed let")
 			}
 			inits := parseInits(x.items[1])
-			body := parseEach(x.items[1:])
+			body := parseEach(x.items[2:])
 			return LetExpr{inits, body}
 		}
 		return parseCallExpr(x)
@@ -1913,6 +1921,26 @@ func (_ BeginExpr) exprVariant() {}
 func (_ JmpExpr) exprVariant()   {}
 func (_ FuncExpr) exprVariant()  {}
 func (_ CallExpr) exprVariant()  {}
+
+type MacroExpr interface {
+	expand() Expr
+	macroExprVariant()
+}
+
+func (_ LetExpr) macroExprVariant() {}
+
+func (expr LetExpr) expand() Expr {
+	params := make([]*Symbol, len(expr.inits))
+	argExprs := make([]Expr, len(expr.inits))
+	for i, init := range expr.inits {
+		params[i] = init.name
+		argExprs[i] = init.expr
+	}
+	return CallExpr{
+		FuncExpr{params, false, expr.body},
+		argExprs,
+	}
+}
 
 func primReadAll(args ...Value) (val Value, err os.Error) {
 	if len(args) != 1 || !stringp(args[0]) {
@@ -2076,7 +2104,6 @@ func genReturn(argp bool, tailp int) []Asm {
 		code = append(code, newReturnAsm())
 	}
 	return code
-
 }
 
 type CompEnv struct {
@@ -2146,91 +2173,40 @@ func (set1 *SymbolSet) minus(set2 *SymbolSet) *SymbolSet {
 	return acc
 }
 
-func analyzeVars(varSpec Value) ([]*Symbol, int, bool) {
-	tail := varSpec
-	vars := []*Symbol{}
-	nvars := 0
-	var dottedp bool
-loop:
-	for {
-		switch x := tail.(type) {
-		case *Cons:
-			sym, ok := x.car.(*Symbol)
-			if !ok {
-				panic("compile: bad variable name")
-			}
-			vars = append(vars, sym)
-			nvars++
-			tail = x.cdr
-		case Nil:
-			dottedp = false
-			break loop
-		default:
-			sym, ok := x.(*Symbol)
-			if !ok {
-				panic("compile: bad variable name")
-			}
-			vars = append(vars, sym)
-			nvars++
-			dottedp = true
-			break loop
-		}
-	}
-	return vars, nvars, dottedp
-}
-
-func collectFree(exps *Cons, b, p *SymbolSet) *SymbolSet {
+func collectFree(exprs []Expr, b, p *SymbolSet) *SymbolSet {
 	refs := newSymbolSet()
-	_ = forEach(exps, func(exp Value) os.Error {
-		subset := findFree(exp, b, p)
-		refs = refs.union(subset)
-		return nil
-	})
+	for _, expr := range exprs {
+		refs = refs.union(findFree(expr, b, p))
+	}
 	return refs
 }
 
-func findFree(exp Value, b, p *SymbolSet) *SymbolSet {
-	switch exp := exp.(type) {
-	case *Symbol:
-		if b.contains(exp) && !p.contains(exp) {
-			return newSymbolSet([]*Symbol{exp})
+func findFree(expr Expr, b, p *SymbolSet) *SymbolSet {
+	refs := newSymbolSet()
+	switch expr := expr.(type) {
+	case RefExpr:
+		if b.contains(expr.name) && !p.contains(expr.name) {
+			refs.include(expr.name)
 		}
-		return newSymbolSet()
-	case *Cons:
-		head := exp.car
-		if nilp(exp.cdr) {
-			return findFree(head, b, p)
-		}
-		tail, ok := exp.cdr.(*Cons)
-		if !ok {
-			panic("compile: ill-formed expression")
-		}
-		sym, ok := head.(*Symbol)
-		if !ok {
-			return collectFree(exp, b, p)
-		}
-		if sym == intern("quote") {
-			return newSymbolSet()
-		}
-		if sym == intern("if") || sym == intern("jmp") ||
-			sym == intern("begin") {
-			return collectFree(tail, b, p)
-		}
-		if sym == intern("func") {
-			vars, _, _ := analyzeVars(tail.car)
-			body, ok := tail.cdr.(*Cons)
-			if !ok {
-				panic("compile: ill-formed func")
-			}
-			s := collectFree(body, b, newSymbolSet(vars))
-			return s.minus(p)
-		}
-		return collectFree(exp, b, p)
+	case IfExpr:
+		refs = findFree(expr.condExpr, b, p)
+		refs = refs.union(findFree(expr.thenExpr, b, p))
+		refs = refs.union(findFree(expr.elseExpr, b, p))
+	case BeginExpr:
+		refs = collectFree(expr.body, b, p)
+	case JmpExpr:
+		refs = findFree(expr.expr, b, p)
+	case FuncExpr:
+		refs = collectFree(expr.body, b, newSymbolSet(expr.params))
+		refs = refs.minus(p)
+	case CallExpr:
+		refs = findFree(expr.funcExpr, b, p)
+		refs = refs.union(collectFree(expr.argExprs, b, p))
 	}
-	return newSymbolSet()
+	return refs
 }
 
-func analyzeRefs(env *CompEnv, locals []*Symbol, body *Cons) (*CompEnv, []FreeRef) {
+func analyzeRefs(env *CompEnv, locals []*Symbol, body []Expr) (*CompEnv, []FreeRef) {
 	freshEnv := newEmptyEnv()
 	freeRefs := []FreeRef{}
 	refs := collectFree(body, env.symbolSet(), newSymbolSet(locals))
@@ -2258,19 +2234,29 @@ func analyzeRefs(env *CompEnv, locals []*Symbol, body *Cons) (*CompEnv, []FreeRe
 	return freshEnv, freeRefs
 }
 
-func compForm(form *Cons, env *CompEnv, argp bool, tailp int) []Asm {
-	head, ok := form.car.(*Symbol)
-	if !ok {
-		return compCall(form, env, argp, tailp)
+func newRefAsm(env *CompEnv, sym *Symbol) Asm {
+	if i, ok := env.local[sym]; ok {
+		return newLocalAsm(i)
 	}
-	if head == intern("quote") {
-		cdr, ok := form.cdr.(*Cons)
-		if !ok {
-			panic(os.NewError("compile: ill-formed quote"))
-		}
-		return compConst(cdr.car, argp, tailp)
+	if i, ok := env.free[sym]; ok {
+		return newFreeAsm(i)
 	}
-	if head == intern("if") {
+	return newGlobalAsm(sym.name)
+}
+
+func compExpr(expr Expr, env *CompEnv, argp bool, tailp int) []Asm {
+	switch expr := expr.(type) {
+	case QuoteExpr:
+		return seq(
+			gen(newConstAsm(expr.x)),
+			genReturn(argp, tailp),
+		)
+	case RefExpr:
+		return seq(
+			gen(newRefAsm(env, expr.name)),
+			genReturn(argp, tailp),
+		)
+	case IfExpr:
 		label0 := newLabel()
 		label1 := newLabel()
 		var jump1Seq, label1Seq, pushSeq []Asm
@@ -2281,192 +2267,100 @@ func compForm(form *Cons, env *CompEnv, argp bool, tailp int) []Asm {
 		if argp {
 			pushSeq = gen(newPushAsm())
 		}
-		subforms := make([]Value, 3)
-		i := 0
-		err := forEach(form.cdr, func(subform Value) os.Error {
-			if i > 2 {
-				return os.NewError("compile: ill-formed if")
-			}
-			subforms[i] = subform
-			i++
-			return nil
-		})
-		if err != nil || i != 3 {
-			panic("compile: ill-formed if")
-		}
 		return seq(
-			compExp(subforms[0], env, false, NONTAIL),
+			compExpr(expr.condExpr, env, false, NONTAIL),
 			gen(newFjumpAsm(label0)),
-			compExp(subforms[1], env, false, tailp),
+			compExpr(expr.thenExpr, env, false, tailp),
 			jump1Seq,
 			gen(label0),
-			compExp(subforms[2], env, false, tailp),
+			compExpr(expr.elseExpr, env, false, tailp),
 			label1Seq,
 			pushSeq,
 		)
-	}
-	if head == intern("begin") {
-		illFormed := os.NewError("compile: ill-formed begin")
-		tail, ok := form.cdr.(*Cons)
-		if !ok {
-			panic(illFormed)
-		}
-		prefixSeq := gen()
-		for !nilp(tail.cdr) {
-			prefixSeq = seq(
-				prefixSeq,
-				compExp(tail.car, env, false, NONTAIL),
+	case BeginExpr:
+		body := expr.body
+		asms := seq()
+		n := len(body)
+		for i := 0; i < n - 1; i++ {
+			asms = seq(
+				asms,
+				compExpr(body[i], env, false, NONTAIL),
 			)
-			tail, ok = tail.cdr.(*Cons)
-			if !ok {
-				panic(illFormed)
-			}
 		}
-		return seq(
-			prefixSeq,
-			compExp(tail.car, env, argp, tailp),
-		)
-	}
-	if head == intern("jmp") {
-		if tailp == NONTAIL {
-			panic(os.NewError("compile: jmp in non-tail position"))
-		}
-		tail, ok := form.cdr.(*Cons)
-		if !ok {
-			panic(os.NewError("compile: ill-formed jmp"))
-		}
-		return compExp(tail.car, env, argp, JMP)
-	}
-	if head == intern("func") {
-		illFormed := os.NewError("compile: ill-formed func")
-		tail, ok := form.cdr.(*Cons)
-		if !ok {
-			panic(illFormed)
-		}
-		vars := tail.car
-		body := &Cons{intern("begin"), tail.cdr}
-		properVars, nvars, dottedp := analyzeVars(vars)
-		funcEnv, freeRefs := analyzeRefs(env, properVars, body)
-		code := assemble(compExp(body, funcEnv, false, TAIL))
-		for _, instr := range code {
-			fmt.Fprintf(os.Stderr, "temp: %#v\n", instr)
-		}
+		return seq(asms, compExpr(body[n-1], env, argp, tailp))
+	case JmpExpr:
+		return compExpr(expr.expr, env, argp, JMP)
+	case FuncExpr:
+		body := BeginExpr{expr.body}
+		nvars := len(expr.params)
+		funcEnv, freeRefs := analyzeRefs(env, expr.params, expr.body)
+		code := assemble(compExpr(body, funcEnv, false, TAIL))
 		temp := &Template{
 			name:     "",
 			nvars:    nvars,
-			dottedp:  dottedp,
+			dottedp:  expr.dotted,
 			freeRefs: freeRefs,
 			code:     code,
+		}
+		fmt.Fprintf(os.Stderr, "func:\n")
+		for i, instr := range code {
+			fmt.Fprintf(os.Stderr, "%d:\t%#v\n", i, instr)
 		}
 		return seq(
 			gen(newCloseAsm(temp)),
 			genReturn(argp, tailp),
 		)
-	}
-	return compCall(form, env, argp, tailp)
-}
-
-func compCall(form *Cons, env *CompEnv, argp bool, tailp int) []Asm {
-	var frameSeq []Asm
-	label := newLabel()
-	if tailp != JMP {
-		frameSeq = gen(newFrameAsm(label))
-	} else {
-		frameSeq = gen()
-	}
-	argsSeq := gen()
-	nargs := 0
-	_ = forEach(form.cdr, func(argForm Value) os.Error {
-		argsSeq = seq(argsSeq, compExp(argForm, env, true, NONTAIL))
-		nargs++
-		return nil
-	})
-	funcSeq := compExp(form.car, env, false, NONTAIL)
-	var shiftSeq []Asm
-	if tailp == JMP {
-		shiftSeq = gen(newShiftAsm())
-	} else {
-		shiftSeq = gen()
-	}
-	applySeq := gen(newApplyAsm(nargs))
-	var labelSeq []Asm
-	if tailp == JMP {
-		labelSeq = gen()
-	} else {
-		labelSeq = gen(label)
-	}
-	var tailSeq []Asm
-	switch tailp {
-	case NONTAIL:
-		if argp {
-			tailSeq = gen(newPushAsm())
-		} else {
-			tailSeq = gen()
+	case CallExpr:
+		label := newLabel()
+		frameSeq := gen(newFrameAsm(label))
+		argsSeq := gen()
+		funcSeq := compExpr(expr.funcExpr, env, false, NONTAIL)
+		shiftSeq := gen()
+		applySeq := gen(newApplyAsm(len(expr.argExprs)))
+		labelSeq := gen(label)
+		tailSeq := gen()
+		for _, argExpr := range expr.argExprs {
+			argsSeq = seq(
+				argsSeq,
+				compExpr(argExpr, env, true, NONTAIL),
+			)
 		}
-	case TAIL:
-		tailSeq = gen(newReturnAsm())
-	case JMP:
-		tailSeq = gen()
-	}
-	return seq(
-		frameSeq,
-		argsSeq,
-		funcSeq,
-		shiftSeq,
-		applySeq,
-		labelSeq,
-		tailSeq,
-	)
-}
-
-func compRef(sym *Symbol, env *CompEnv, argp bool, tailp int) []Asm {
-	if i, ok := env.local[sym]; ok {
+		if tailp == JMP {
+			frameSeq = gen()
+			shiftSeq = gen(newShiftAsm())
+			labelSeq = gen()
+		} else if tailp == TAIL {
+			tailSeq = gen(newReturnAsm())
+		} else if argp {
+			tailSeq = gen(newPushAsm())
+		}
 		return seq(
-			gen(newLocalAsm(i)),
-			genReturn(argp, tailp),
+			frameSeq,
+			argsSeq,
+			funcSeq,
+			shiftSeq,
+			applySeq,
+			labelSeq,
+			tailSeq,
 		)
 	}
-	if i, ok := env.free[sym]; ok {
-		return seq(
-			gen(newFreeAsm(i)),
-			genReturn(argp, tailp),
-		)
-	}
-	return seq(
-		gen(newGlobalAsm(sym.name)),
-		genReturn(argp, tailp),
-	)
+	panic("compile: unexpected expression")
+	return []Asm{}
 }
 
-func compConst(exp Value, argp bool, tailp int) []Asm {
-	return seq(
-		gen(newConstAsm(exp)),
-		genReturn(argp, tailp),
-	)
-}
-
-func compExp(exp Value, env *CompEnv, argp bool, tailp int) []Asm {
-	switch exp := exp.(type) {
-	case *Cons:
-		return compForm(exp, env, argp, tailp)
-	case *Symbol:
-		return compRef(exp, env, argp, tailp)
-	}
-	return compConst(exp, argp, tailp)
-}
-
-func compile(exp Value) (temp *Template, err os.Error) {
+func compile(expr Expr) (temp *Template, err os.Error) {
 	defer func() {
-		if x := recover(); x != nil {
-			var ok bool
-			err, ok = x.(os.Error)
-			if !ok {
-				panic(x)
-			}
+		x := recover()
+		if s, ok := x.(string); ok {
+			err = os.NewError(s)
+			return
+		}
+		if x != nil {
+			panic(x)
 		}
 	}()
-	coreExp := macroexpandall(exp)
-	code := assemble(compExp(coreExp, newEmptyEnv(), false, TAIL))
+	core := macroexpandall(expr)
+	code := assemble(compExpr(core, newEmptyEnv(), false, TAIL))
 	temp = &Template{
 		name:     "",
 		nvars:    0,
@@ -2477,80 +2371,51 @@ func compile(exp Value) (temp *Template, err os.Error) {
 	return
 }
 
-func isMacroForm(exp Value) bool {
-	cons, ok := exp.(*Cons)
-	if !ok {
-		return false
+func macroexpandall(expr Expr) Expr {
+	if macro, ok := expr.(MacroExpr); ok {
+		expr = macro.expand()
 	}
-	head, ok := cons.car.(*Symbol)
-	if !ok {
-		return false
-	}
-	if head == intern("let") {
-		return true
-	}
-	return false
-}
-
-func macroexpand(exp Value) Value {
-	cons := exp.(*Cons)
-	head := cons.car.(*Symbol)
-	if head == intern("let") {
-		bindings := cons.cdr.(*Cons).car
-		body := cons.cdr.(*Cons).cdr
-		vars := listMap(bindings, func(b Value) Value {
-			return b.(*Cons).car
-		})
-		inits := listMap(bindings, func(b Value) Value {
-			return b.(*Cons).cdr.(*Cons).car
-		})
-		return &Cons{
-			&Cons{
-				intern("func"),
-				&Cons{
-					vars,
-					body,
-				},
-			},
-			inits,
+	switch core := expr.(type) {
+	case QuoteExpr:
+		return core
+	case RefExpr:
+		return core
+	case IfExpr:
+		return IfExpr{
+			condExpr: macroexpandall(core.condExpr),
+			thenExpr: macroexpandall(core.thenExpr),
+			elseExpr: macroexpandall(core.elseExpr),
+		}
+	case BeginExpr:
+		body := make([]Expr, len(core.body))
+		for i, subexpr := range core.body {
+			body[i] = macroexpandall(subexpr)
+		}
+		return BeginExpr{body}
+	case JmpExpr:
+		return JmpExpr{macroexpandall(core.expr)}
+	case FuncExpr:
+		body := make([]Expr, len(core.body))
+		for i, subexpr := range core.body {
+			body[i] = macroexpandall(subexpr)
+		}
+		return FuncExpr{
+			core.params,
+			core.dotted,
+			body,
+		}
+	case CallExpr:
+		argExprs := make([]Expr, len(core.argExprs))
+		for i, argExpr := range core.argExprs {
+			argExprs[i] = macroexpandall(argExpr)
+		}
+		return CallExpr{
+			macroexpandall(core.funcExpr),
+			argExprs,
 		}
 	}
-	return exp
-}
-
-func macroexpandall(exp Value) Value {
-	for isMacroForm(exp) {
-		exp = macroexpand(exp)
-	}
-	cons, ok := exp.(*Cons)
-	if !ok {
-		return exp
-	}
-	head, ok := cons.car.(*Symbol)
-	if !ok {
-		return listMap(exp, macroexpandall)
-	}
-	if head == intern("quote") {
-		return exp
-	}
-	if head == intern("if") || head == intern("begin") ||
-		head == intern("jmp") {
-		return &Cons{head, listMap(cons.cdr, macroexpandall)}
-	}
-	if head == intern("func") {
-		tail, ok := cons.cdr.(*Cons)
-		if !ok {
-			panic("macroexpandall: ill-formed func")
-		}
-		return &Cons{
-			head,
-			&Cons{
-				tail.car,
-				listMap(tail.cdr, macroexpandall),
-			},
-		}
-	}
-	return listMap(exp, macroexpandall)
+	panic("macroexpandall: unexpected expression")
+	return QuoteExpr{Nil{}}
 }
 
 /// loading
@@ -2828,25 +2693,23 @@ func fetchSourceModule(name, address string) (mod *Module, err os.Error) {
 		return
 	}
 	defer response.Body.Close()
-	text, err := ioutil.ReadAll(response.Body)
-	if err != nil {
-		return
-	}
-	forms, err := primReadAll(String(text))
-	if err != nil {
-		return
-	}
-	temps := []*Template{}
-	err = forEach(forms, func(form Value) os.Error {
-		temp, err := compile(form)
-		if err != nil {
-			return err
+	defer func() {
+		x := recover()
+		if s, ok := x.(string); ok {
+			err = os.NewError(s)
+			return
 		}
-		temps = append(temps, temp)
-		return nil
-	})
-	if err != nil {
-		return
+		if x != nil {
+			panic(x)
+		}
+	}()
+	exprs := newReadAll(response.Body)
+	temps := make([]*Template, len(exprs))
+	for i, expr := range exprs {
+		temps[i], err = compile(parseExpr(expr))
+		if err != nil {
+			return
+		}
 	}
 	mod = &Module{topFunc(temps)}
 	return
