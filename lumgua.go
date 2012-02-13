@@ -1662,6 +1662,9 @@ func readList(buf io.ByteScanner) Literal {
 		items = append(items, read(buf))
 		skipws(buf)
 	}
+	if len(items) == 0 {
+		return Nil{}
+	}
 	return newListLiteral(dotted, items...)
 }
 
@@ -1749,6 +1752,8 @@ func parseCallExpr(form *ListLiteral) Expr {
 
 func parseParams(lit Literal) ([]*Symbol, bool) {
 	switch x := lit.(type) {
+	case Nil:
+		return []*Symbol{}, false
 	case *Symbol:
 		return []*Symbol{x}, true
 	case *ListLiteral:
@@ -1796,12 +1801,12 @@ func parseEach(forms []Literal) []Expr {
 
 func parseCondClause(form Literal) CondClause {
 	list, ok := form.(*ListLiteral)
-	if !ok || list.dotted || len(list.items) != 2 {
+	if !ok || list.dotted || len(list.items) < 2 {
 		panic("parseExpr: ill-formed cond clause")
 	}
 	return CondClause{
 		parseExpr(list.items[0]),
-		parseExpr(list.items[1]),
+		parseEach(list.items[1:]),
 	}
 }
 
@@ -2089,7 +2094,7 @@ type DefineExpr struct {
 
 type CondClause struct {
 	condExpr Expr
-	thenExpr Expr
+	thenBody []Expr
 }
 
 type CondExpr struct {
@@ -2180,7 +2185,7 @@ func (expr CondExpr) expand() Expr {
 	for i := len(clauses) - 1; i >= 0; i-- {
 		acc = IfExpr{
 			clauses[i].condExpr,
-			clauses[i].thenExpr,
+			BeginExpr{clauses[i].thenBody},
 			acc,
 		}
 	}
