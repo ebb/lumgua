@@ -121,8 +121,6 @@
       exp)
      (t
       (match exp
-	((quote exp)
-	 `(list 'quote ,(qq exp)))
 	((unquote exp)
 	 exp)
 	((quasiquote exp)
