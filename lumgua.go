@@ -1717,6 +1717,9 @@ type Literal interface {
 	literalVariant()
 }
 
+// Invariants:
+//   len(items) > 0
+//   if dotted, then len(items) > 1
 type ListLiteral struct {
 	dotted bool
 	items  []Literal
@@ -1803,6 +1806,86 @@ func parseCondClause(form Literal) CondClause {
 	}
 }
 
+func analyzeUnquotesplicing(lit Literal) (Literal, bool) {
+	var head *Symbol
+	x, ok := lit.(*ListLiteral)
+	if !ok {
+		goto nomatch
+	}
+	if x.dotted || len(x.items) != 2 {
+		goto nomatch
+	}
+	head, ok = x.items[0].(*Symbol)
+	if !ok {
+		goto nomatch
+	}
+	if head == intern("unquotesplicing") {
+		return x.items[1], true
+	}
+nomatch:
+	return Nil{}, false
+}
+
+func expandQuasi(lit Literal) Literal {
+	switch x := lit.(type) {
+	case Nil:
+		return x
+	case Number:
+		return x
+	case String:
+		return x
+	case *Symbol:
+		return newListLiteral(false, intern("quote"), x)
+	}
+	x, ok := lit.(*ListLiteral)
+	if !ok {
+		panic("expandQuasi: unexpected literal type")
+	}
+	if head, ok := x.items[0].(*Symbol); ok {
+		if head == intern("unquote") {
+			if len(x.items) != 2 || x.dotted {
+				panic("expandQuasi: ill-formed unquote")
+			}
+			return x.items[1]
+		}
+		if head == intern("quasiquote") {
+			if len(x.items) != 2 || x.dotted {
+				panic("expandQuasi: ill-formed quasiquote")
+			}
+			return expandQuasi(expandQuasi(x.items[1]))
+		}
+	}
+	item := x.items[len(x.items) - 1]
+	acc := expandQuasi(item)
+	if !x.dotted {
+		acc = newListLiteral(
+			false,
+			intern("list"),
+			acc,
+		)
+	}
+	for i := len(x.items) - 2; i >= 0; i-- {
+		item = x.items[i]
+		subLit, ok := analyzeUnquotesplicing(item)
+		if ok {
+			acc = newListLiteral(
+				false,
+				intern("append"),
+				subLit,
+				acc,
+			)
+			continue
+		}
+		acc = newListLiteral(
+			false,
+			intern("cons"),
+			expandQuasi(item),
+			acc,
+		)
+	}
+	return acc
+}
+
 func parseExpr(lit Literal) Expr {
 	switch x := lit.(type) {
 	case Nil:
@@ -1823,6 +1906,12 @@ func parseExpr(lit Literal) Expr {
 		head, ok := x.items[0].(*Symbol)
 		if !ok {
 			return parseCallExpr(x)
+		}
+		if head == intern("quasiquote") {
+			if len(x.items) != 2 {
+				panic("parseExpr: ill-formed quasiquote")
+			}
+			return parseExpr(expandQuasi(x.items[1]))
 		}
 		if head == intern("quote") {
 			if len(x.items) != 2 {
