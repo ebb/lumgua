@@ -1719,7 +1719,6 @@ type Literal interface {
 
 // Invariants:
 //   len(items) > 0
-//   if dotted, then len(items) > 1
 type ListLiteral struct {
 	dotted bool
 	items  []Literal
@@ -1886,6 +1885,42 @@ func expandQuasi(lit Literal) Literal {
 	return acc
 }
 
+func parseMatchClause(lit Literal) MatchClause {
+	var clause MatchClause
+	x, ok := lit.(*ListLiteral)
+	if !ok || x.dotted || len(x.items) < 2 {
+		panic("parseExpr: ill-formed match clause")
+	}
+	sym, ok := x.items[0].(*Symbol)
+	if ok && sym == intern("t") {
+		// TODO - this is awkward
+		clause.tag = sym
+		clause.params = []*Symbol{}
+		clause.dotted = false
+		clause.body = parseEach(x.items[1:])
+		return clause
+	}
+	pattern, ok := x.items[0].(*ListLiteral)
+	if !ok || len(pattern.items) < 1 {
+		panic("parseExpr: ill-formed match clause")
+	}
+	clause.tag, ok = pattern.items[0].(*Symbol)
+	if !ok {
+		panic("parseExpr: ill-formed match clause")
+	}
+	clause.dotted = pattern.dotted
+	clause.params = make([]*Symbol, len(pattern.items[1:]))
+	for i, item := range pattern.items[1:] {
+		sym, ok := item.(*Symbol)
+		if !ok {
+			panic("parseExpr: ill-formed match clause")
+		}
+		clause.params[i] = sym
+	}
+	clause.body = parseEach(x.items[1:])
+	return clause
+}
+
 func parseExpr(lit Literal) Expr {
 	switch x := lit.(type) {
 	case Nil:
@@ -1980,6 +2015,19 @@ func parseExpr(lit Literal) Expr {
 		}
 		if head == intern("or") {
 			return OrExpr{parseEach(x.items[1:])}
+		}
+		if head == intern("match") {
+			if len(x.items) < 3 {
+				panic("parseExpr: ill-formed match")
+			}
+			clauses := make([]MatchClause, len(x.items[2:]))
+			for i, item := range x.items[2:] {
+				clauses[i] = parseMatchClause(item)
+			}
+			return MatchExpr{
+				parseExpr(x.items[1]),
+				clauses,
+			}
 		}
 		return parseCallExpr(x)
 	}
@@ -2161,6 +2209,100 @@ func (expr OrExpr) expand() Expr {
 		}
 	}
 	return acc
+}
+
+func (expr MatchExpr) expand() Expr {
+	i := len(expr.clauses) - 1
+	clause := expr.clauses[i]
+	var acc Expr
+	if clause.tag == intern("t") {
+		funcExpr := FuncExpr{
+			[]*Symbol{intern("tag"), intern("args")},
+			false,
+			[]Expr{CallExpr{RefExpr{intern("f")}, []Expr{}}},
+		}
+		acc = LetExpr{
+			[]InitPair{{
+				intern("f"),
+				FuncExpr{
+					[]*Symbol{},
+					false,
+					clause.body,
+				},
+			}},
+			[]Expr{funcExpr},
+		}
+		i--
+	} else {
+		acc = FuncExpr{
+			[]*Symbol{intern("tag"), intern("args")},
+			false,
+			[]Expr{CallExpr{
+				RefExpr{intern("throw")},
+				[]Expr{QuoteExpr{String("match: no match")}},
+			}},
+		}
+	}
+	for i >= 0 {
+		funcExpr := FuncExpr{
+			[]*Symbol{intern("tag"), intern("args")},
+			false,
+			[]Expr{IfExpr{
+				CallExpr{
+					RefExpr{intern("=")},
+					[]Expr{
+						RefExpr{intern("tag")},
+						QuoteExpr{expr.clauses[i].tag},
+					},
+				},
+				CallExpr{
+					RefExpr{intern("apply")},
+					[]Expr{
+						RefExpr{intern("f")},
+						RefExpr{intern("args")},
+					},
+				},
+				CallExpr{
+					RefExpr{intern("g")},
+					[]Expr{
+						RefExpr{intern("tag")},
+						RefExpr{intern("args")},
+					},
+				},
+			}},
+		}
+		acc = LetExpr{
+			[]InitPair{{
+				intern("f"),
+				FuncExpr{
+					expr.clauses[i].params,
+					expr.clauses[i].dotted,
+					expr.clauses[i].body,
+				},
+			}, {
+				intern("g"),
+				acc,
+			}},
+			[]Expr{funcExpr},
+		}
+		i--
+	}
+	return LetExpr{
+		[]InitPair{{intern("x"), expr.x}},
+		[]Expr{CallExpr{
+			acc,
+			[]Expr{
+				CallExpr{
+					RefExpr{intern("car")},
+					[]Expr{RefExpr{intern("x")}},
+				},
+				CallExpr{
+					RefExpr{intern("cdr")},
+					[]Expr{RefExpr{intern("x")}},
+				},
+			},
+		}},
+	}
 }
 
 /// compiler
@@ -2486,6 +2628,9 @@ func compExpr(expr Expr, env *CompEnv, argp bool, tailp int) []Asm {
 	case FuncExpr:
 		body := BeginExpr{expr.body}
 		nvars := len(expr.params)
+		if expr.dotted {
+			nvars--
+		}
 		funcEnv, freeRefs := analyzeRefs(env, expr.params, expr.body)
 		code := assemble(compExpr(body, funcEnv, false, TAIL))
 		temp := &Template{
