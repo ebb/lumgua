@@ -1868,9 +1868,11 @@ func expandQuasi(lit Literal) Literal {
 			acc,
 		)
 	}
+	fmt.Printf("len(x.items) = %v\n", len(x.items))
 	for i := len(x.items) - 2; i >= 0; i-- {
 		item = x.items[i]
 		subLit, ok := analyzeUnquotesplicing(item)
+		fmt.Printf("unquotesplicing!\n")
 		if ok {
 			acc = newListLiteral(
 				false,
@@ -2220,6 +2222,7 @@ func (expr MatchExpr) expand() Expr {
 	i := len(expr.clauses) - 1
 	clause := expr.clauses[i]
 	var acc Expr
+	var defaultExpr Expr
 	if clause.tag == intern("t") {
 		funcExpr := FuncExpr{
 			[]*Symbol{intern("tag"), intern("args")},
@@ -2237,6 +2240,7 @@ func (expr MatchExpr) expand() Expr {
 			}},
 			[]Expr{funcExpr},
 		}
+		defaultExpr = BeginExpr{clause.body}
 		i--
 	} else {
 		acc = FuncExpr{
@@ -2246,6 +2250,10 @@ func (expr MatchExpr) expand() Expr {
 				RefExpr{intern("throw")},
 				[]Expr{QuoteExpr{String("match: no match")}},
 			}},
+		}
+		defaultExpr = CallExpr{
+			RefExpr{intern("throw")},
+			[]Expr{QuoteExpr{String("match: no match")}},
 		}
 	}
 	for i >= 0 {
@@ -2294,18 +2302,25 @@ func (expr MatchExpr) expand() Expr {
 	}
 	return LetExpr{
 		[]InitPair{{intern("x"), expr.x}},
-		[]Expr{CallExpr{
-			acc,
-			[]Expr{
-				CallExpr{
-					RefExpr{intern("car")},
-					[]Expr{RefExpr{intern("x")}},
-				},
-				CallExpr{
-					RefExpr{intern("cdr")},
-					[]Expr{RefExpr{intern("x")}},
+		[]Expr{IfExpr{
+			CallExpr{
+				RefExpr{intern("consp")},
+				[]Expr{RefExpr{intern("x")}},
+			},
+			CallExpr{
+				acc,
+				[]Expr{
+					CallExpr{
+						RefExpr{intern("car")},
+						[]Expr{RefExpr{intern("x")}},
+					},
+					CallExpr{
+						RefExpr{intern("cdr")},
+						[]Expr{RefExpr{intern("x")}},
+					},
 				},
 			},
+			defaultExpr,
 		}},
 	}
 }
