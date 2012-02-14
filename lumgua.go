@@ -10,7 +10,6 @@ import (
 	"http"
 	"io"
 	"io/ioutil"
-	"json"
 	"log"
 	"math"
 	"os"
@@ -29,8 +28,6 @@ var address *string = flag.String("a", ":8082", "address")
 /// global state
 
 var globals map[string]*Binding
-
-var faslDict map[string]FaslCombiner
 
 var symbolTable map[string]*Symbol
 
@@ -807,6 +804,50 @@ func packFreeRefs(src Value) ([]FreeRef, os.Error) {
 		}
 	}
 	return freeRefs, nil
+}
+
+func makeInstr(opcode string, args Value) Instr {
+	arg := Value(Nil{})
+	if !nilp(args) {
+		var err os.Error
+		arg, err = car(args)
+		if err != nil {
+			panic("makeInstr: bad argument")
+		}
+	}
+	switch opcode {
+	case "continuation":
+		return newContinuationInstr()
+	case "close":
+		return newCloseInstr(arg)
+	case "frame":
+		return newFrameInstr(arg)
+	case "shift":
+		return newShiftInstr()
+	case "apply":
+		return newApplyInstr(arg)
+	case "return":
+		return newReturnInstr()
+	case "const":
+		return newConstInstr(arg)
+	case "global":
+		return newGlobalInstr(arg)
+	case "local":
+		return newLocalInstr(arg)
+	case "free":
+		return newFreeInstr(arg)
+	case "push":
+		return newPushInstr()
+	case "fjump":
+		return newFjumpInstr(arg)
+	case "jump":
+		return newJumpInstr(arg)
+	case "halt":
+		return newHaltInstr()
+	default:
+		panic("makeInstr: unknown opcode: \"" + opcode + "\"")
+	}
+	return nil
 }
 
 func packCode(src Value) ([]Instr, os.Error) {
@@ -1943,11 +1984,9 @@ func expandQuasi(lit Literal) Literal {
 			acc,
 		)
 	}
-	fmt.Printf("len(x.items) = %v\n", len(x.items))
 	for i := len(x.items) - 2; i >= 0; i-- {
 		item = x.items[i]
 		subLit, ok := analyzeUnquotesplicing(item)
-		fmt.Printf("unquotesplicing!\n")
 		if ok {
 			acc = newListLiteral(
 				false,
@@ -2735,10 +2774,6 @@ func compExpr(expr Expr, env *CompEnv, argp bool, tailp int) []Asm {
 			freeRefs: freeRefs,
 			code:     code,
 		}
-		fmt.Fprintf(os.Stderr, "func:\n")
-		for i, instr := range code {
-			fmt.Fprintf(os.Stderr, "%d:\t%#v\n", i, instr)
-		}
 		return seq(
 			gen(newCloseAsm(temp)),
 			genReturn(argp, tailp),
@@ -2857,209 +2892,8 @@ func macroexpandall(expr Expr) Expr {
 
 /// loading
 
-var faslParseError = os.NewError("fasl parse error")
-
-func makeInstr(opcode string, args Value) Instr {
-	arg := Value(Nil{})
-	if !nilp(args) {
-		var err os.Error
-		arg, err = car(args)
-		if err != nil {
-			panic("makeInstr: bad argument")
-		}
-	}
-	switch opcode {
-	case "continuation":
-		return newContinuationInstr()
-	case "close":
-		return newCloseInstr(arg)
-	case "frame":
-		return newFrameInstr(arg)
-	case "shift":
-		return newShiftInstr()
-	case "apply":
-		return newApplyInstr(arg)
-	case "return":
-		return newReturnInstr()
-	case "const":
-		return newConstInstr(arg)
-	case "global":
-		return newGlobalInstr(arg)
-	case "local":
-		return newLocalInstr(arg)
-	case "free":
-		return newFreeInstr(arg)
-	case "push":
-		return newPushInstr()
-	case "fjump":
-		return newFjumpInstr(arg)
-	case "jump":
-		return newJumpInstr(arg)
-	case "halt":
-		return newHaltInstr()
-	default:
-		panic("makeInstr: unknown opcode: \"" + opcode + "\"")
-	}
-	return nil
-}
-
 type Module struct {
 	f *Func
-}
-
-func parseInt(arg interface{}) int {
-	n, ok := arg.(float64)
-	if !ok {
-		panic(faslParseError)
-	}
-	return int(n)
-}
-
-func parseBool(arg interface{}) bool {
-	v, ok := arg.([]interface{})
-	return !ok || len(v) != 0
-}
-
-func parseFreeRef(arg interface{}) FreeRef {
-	form, ok := arg.([]interface{})
-	if !ok {
-		panic(faslParseError)
-	}
-	kind, ok := form[0].(string)
-	if !ok {
-		panic(faslParseError)
-	}
-	i, ok := form[1].(float64)
-	if !ok {
-		panic(faslParseError)
-	}
-	switch kind {
-	case "local":
-		return FreeRef{LOCAL, int(i)}
-	case "free":
-		return FreeRef{FREE, int(i)}
-	}
-	panic(faslParseError)
-}
-
-func parseFreeRefs(arg interface{}) []FreeRef {
-	forms, ok := arg.([]interface{})
-	if !ok {
-		panic(faslParseError)
-	}
-	n := len(forms)
-	freeRefs := make([]FreeRef, n)
-	for i, form := range forms {
-		freeRefs[i] = parseFreeRef(form)
-	}
-	return freeRefs
-}
-
-func parseInstr(arg interface{}) Instr {
-	forms, ok := arg.([]interface{})
-	if !ok || len(forms) < 1 {
-		panic(faslParseError)
-	}
-	opcode, ok := forms[0].(string)
-	if !ok {
-		panic(faslParseError)
-	}
-	instrArgs := Value(Nil{})
-	for i := len(forms) - 1; i > 0; i-- {
-		instrArgs = &Cons{faslEval(forms[i]), instrArgs}
-	}
-	return makeInstr(opcode, instrArgs)
-}
-
-func parseCode(arg interface{}) []Instr {
-	forms, ok := arg.([]interface{})
-	if !ok {
-		panic(faslParseError)
-	}
-	n := len(forms)
-	instrs := make([]Instr, n)
-	for i, form := range forms {
-		instrs[i] = parseInstr(form)
-	}
-	return instrs
-}
-
-func parseTemplate(args []interface{}) Value {
-	if len(args) != 4 {
-		panic(faslParseError)
-	}
-	temp := new(Template)
-	temp.name = ""
-	temp.nvars = parseInt(args[0])
-	temp.dottedp = parseBool(args[1])
-	temp.freeRefs = parseFreeRefs(args[2])
-	temp.code = parseCode(args[3])
-	return temp
-}
-
-func parseString(args []interface{}) Value {
-	if len(args) != 1 {
-		panic(faslParseError)
-	}
-	s, ok := args[0].(string)
-	if !ok {
-		panic(faslParseError)
-	}
-	return String(s)
-}
-
-func parseList(args []interface{}) Value {
-	if len(args) != 1 {
-		panic(faslParseError)
-	}
-	elems, ok := args[0].([]interface{})
-	if !ok {
-		panic(faslParseError)
-	}
-	v := Value(Nil{})
-	for i := len(elems) - 1; i >= 0; i-- {
-		v = &Cons{faslEval(elems[i]), v}
-	}
-	return v
-}
-
-func parseDotted(args []interface{}) Value {
-	if len(args) != 1 {
-		panic(faslParseError)
-	}
-	elems, ok := args[0].([]interface{})
-	if !ok {
-		panic(faslParseError)
-	}
-	if len(elems) < 2 {
-		panic(faslParseError)
-	}
-	v := faslEval(elems[len(elems)-1])
-	for i := len(elems) - 2; i >= 0; i-- {
-		v = &Cons{faslEval(elems[i]), v}
-	}
-	return v
-}
-
-type FaslCombiner func([]interface{}) Value
-
-func faslEval(v interface{}) Value {
-	switch x := v.(type) {
-	case float64:
-		return Number(x)
-	case string:
-		return intern(x)
-	case []interface{}:
-		if len(x) == 0 {
-			return Nil{}
-		}
-		if name, ok := x[0].(string); ok {
-			if combiner, ok := faslDict[name]; ok {
-				return combiner(x[1:])
-			}
-		}
-	}
-	panic(faslParseError)
 }
 
 func topFunc(temps []*Template) *Func {
@@ -3077,53 +2911,8 @@ func topFunc(temps []*Template) *Func {
 	}
 }
 
-func parseModule(v interface{}) (mod *Module, err os.Error) {
-	defer func() {
-		if x := recover(); x != nil {
-			if x == faslParseError {
-				err = os.NewError("parseModule: fail")
-				return
-			}
-			panic(x)
-		}
-	}()
-	forms, ok := v.([]interface{})
-	if !ok {
-		panic(faslParseError)
-	}
-	temps := make([]*Template, len(forms))
-	for i, form := range forms {
-		temp, ok := faslEval(form).(*Template)
-		if !ok {
-			panic(faslParseError)
-		}
-		temps[i] = temp
-	}
-	mod = &Module{topFunc(temps)}
-	return
-}
-
-func fetchModule(name, address string) (mod *Module, err os.Error) {
-	url := "http://" + address + "/" + name + ".fasl"
-	response, err := http.Get(url)
-	if err != nil {
-		err = os.NewError("fetchModule: HTTP fail")
-		return
-	}
-	defer response.Body.Close()
-	var v interface{}
-	err = json.NewDecoder(response.Body).Decode(&v)
-	if err != nil {
-		err = os.NewError("fetchModule: JSON fail")
-		return
-	}
-	mod, err = parseModule(v)
-	return
-}
-
 func fetchSourceModule(name, address string) (mod *Module, err os.Error) {
 	url := "http://" + address + "/" + name + ".lisp"
-	fmt.Println(url)
 	response, err := http.Get(url)
 	if err != nil {
 		err = os.NewError("fetchSourceModule: HTTP fail")
@@ -3152,15 +2941,6 @@ func fetchSourceModule(name, address string) (mod *Module, err os.Error) {
 	return
 }
 
-func loadFile(name string) {
-	mod, err := fetchModule(name, *address)
-	if err != nil {
-		log.Fatalln(err)
-	}
-	m := newMachine(mod.f)
-	m.run()
-}
-
 func loadSourceFile(name string) {
 	mod, err := fetchSourceModule(name, *address)
 	if err != nil {
@@ -3179,16 +2959,6 @@ func initReader() {
 		'(': readList,
 	}
 }
-
-func initLoader() {
-	faslDict = map[string]FaslCombiner{
-		"string":   parseString,
-		"list":     parseList,
-		"dotted":   parseDotted,
-		"template": parseTemplate,
-	}
-}
-
 func initInterpreter() {
 	unboundGlobalValue = &Cons{Nil{}, Nil{}}
 	sharedPrimStack = make([]Value, 8)
@@ -3199,7 +2969,6 @@ func initInterpreter() {
 
 func init() {
 	initReader()
-	initLoader()
 	initInterpreter()
 }
 
