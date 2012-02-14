@@ -3206,10 +3206,6 @@ func init() {
 func main() {
 	flag.Parse()
 	for _, name := range flag.Args() {
-		if name == "test" {
-			loadSourceFile(name)
-			continue
-		}
-		loadFile(name)
+		loadSourceFile(name)
 	}
 }
