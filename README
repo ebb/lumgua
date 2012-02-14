@@ -1,4 +1,4 @@
-Lumgua is a simple functional programming language.  Sample code:
+Lumgua is a simple programming language.  Sample code:
 
   (define compile
     (func (exp)
@@ -12,28 +12,21 @@ Lumgua is a simple functional programming language.  Sample code:
 
 Getting Started
 
-To try it out, you must first build the statically compiled tools,
-which are written in Go.  If you have Go set up, then maybe the
-following will work:
+Try the following:
 
-  $ bash refresh.bash
+  term1:
+    $ bash lumgua.bash
+    entering REPL
 
-If the tools -- server, lumgua, and lispin -- were built successfully,
-then you can do something like this:
+  term2:
+    $ echo '(log "hello world")' | ./lispin
+    $ ./lispin
+    (log "hello again")
+    ^D
+    $ emacs # see below
 
-  1. Open up three terminal windows.
-  2. Run server in the first terminal:
-       $ ./server
-  3. Run lumgua in the second terminal:
-       $ ./lumgua core compile text debug repl
-  4. Try an evaluation in the third terminal.
-       $ echo '(+ 1 2)' | ./lispin
-  5. Look to see if the evaluated result was printed in the second
-     terminal.
-
-If you use emacs, take a look at lumgua.el.  It can be used to
-interactively evaluate Lumgua expressions.  It's pretty
-straightforward but I won't put instructions here.
+If you load lumgua.el into an emacs buffer, you can use C-c C-e to
+send the expression before point to a running Lumgua process.
 
 
 The Language
@@ -75,7 +68,6 @@ The implementation has a few useful features beyond mere evaluation:
   * Interaction with emacs.
   * Reasonably useful stack traces.
   * Disassembly of functions.
-  * Bootstrapped compiler.
 
 The following publications have been used extensively for inspiration:
 

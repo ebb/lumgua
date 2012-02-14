@@ -7,6 +7,7 @@ import (
 	"io"
 	"io/ioutil"
 	"os"
+	"os/signal"
 	"time"
 )
 
@@ -62,6 +63,12 @@ func evalHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func signalHandler() {
+	s := <-signal.Incoming
+	fmt.Fprintln(os.Stderr, "Exiting due to signal: " + s.String())
+	os.Exit(0)
+}
+
 func init() {
 	evalChan = make(chan []byte, 1)
 }
@@ -72,6 +79,7 @@ func main() {
 	http.HandleFunc("/log", logHandler)
 	http.HandleFunc("/eval", evalHandler)
 	println("Listening on", *address)
+	go signalHandler()
 	err := http.ListenAndServe(*address, nil)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, err.String())

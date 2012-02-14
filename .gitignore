@@ -5,3 +5,5 @@ lumgua.6
 server
 server.6
 dump
+server.log
+lumgua.log
