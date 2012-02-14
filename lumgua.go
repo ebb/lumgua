@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"container/vector"
 	"exec"
 	"flag"
@@ -1398,6 +1399,48 @@ func primExit(args ...Value) (Value, os.Error) {
 	return nil, os.NewError("exit: failed to exit!")
 }
 
+func primReadAll(args ...Value) (val Value, err os.Error) {
+	if len(args) != 1 || !stringp(args[0]) {
+		return nil, os.NewError("readall: bad argument list")
+	}
+	defer func() {
+		x := recover()
+		if x == nil {
+			return
+		}
+		if s, ok := x.(string); ok {
+			err = os.NewError(s)
+			return
+		}
+		panic(x)
+	}()
+	buf := bytes.NewBufferString(string(args[0].(String)))
+	lits := newReadAll(buf)
+	acc := Value(Nil{})
+	for i := len(lits) - 1; i >= 0; i-- {
+		acc = &Cons{valueOfLiteral(lits[i]), acc}
+	}
+	return acc, nil
+}
+
+func primCompile(args ...Value) (val Value, err os.Error) {
+	if len(args) != 1 {
+		return nil, os.NewError("compile: wrong number of arguments")
+	}
+	defer func() {
+		x := recover()
+		if x == nil {
+			return
+		}
+		if s, ok := x.(string); ok {
+			err = os.NewError(s)
+			return
+		}
+		panic(x)
+	}()
+	return compile(parseExpr(literalOfValue(args[0])))
+}
+
 var primDecls = [][]interface{}{
 	{"symbolp x", primSymbolp},
 	{"numberp x", primNumberp},
@@ -1449,6 +1492,8 @@ var primDecls = [][]interface{}{
 	{"now", primNow},
 	{"exec cmd . args", primExec},
 	{"exit code", primExit},
+	{"readall str", primReadAll},
+	{"compile expr", primCompile},
 }
 
 func define(name string, value Value) {
@@ -1714,6 +1759,36 @@ func valueOfLiteral(lit Literal) Value {
 		return z
 	}
 	return lit
+}
+
+func literalOfValue(val Value) Literal {
+	switch x := val.(type) {
+	case Nil:
+		return x
+	case Number:
+		return x
+	case String:
+		return x
+	case *Symbol:
+		return x
+	}
+	cons, ok := val.(*Cons)
+	if !ok {
+		panic("literalOfValue: nonliteral value")
+	}
+	items := []Literal{}
+	for {
+		items = append(items, literalOfValue(cons.car))
+		if nilp(cons.cdr) {
+			break
+		}
+		cons, ok = cons.cdr.(*Cons)
+		if !ok {
+			items = append(items, literalOfValue(cons.cdr))
+			return &ListLiteral{true, items}
+		}
+	}
+	return &ListLiteral{false, items}
 }
 
 type Literal interface {
@@ -2222,7 +2297,7 @@ func (expr MatchExpr) expand() Expr {
 	i := len(expr.clauses) - 1
 	clause := expr.clauses[i]
 	var acc Expr
-	var defaultExpr Expr
+	var defaultExpr Expr // XXX - code gets duplicated in the expansion
 	if clause.tag == intern("t") {
 		funcExpr := FuncExpr{
 			[]*Symbol{intern("tag"), intern("args")},
