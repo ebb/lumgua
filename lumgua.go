@@ -1823,11 +1823,11 @@ func literalOfValue(val Value) Literal {
 		if nilp(cons.cdr) {
 			break
 		}
-		cons, ok = cons.cdr.(*Cons)
-		if !ok {
+		if !consp(cons.cdr) {
 			items = append(items, literalOfValue(cons.cdr))
 			return &ListLiteral{true, items}
 		}
+		cons, _ = cons.cdr.(*Cons)
 	}
 	return &ListLiteral{false, items}
 }
