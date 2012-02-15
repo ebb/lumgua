@@ -13,7 +13,6 @@ import (
 	"log"
 	"math"
 	"os"
-	"reflect"
 	//	"runtime/debug"
 	"strconv"
 	"strings"
@@ -35,7 +34,11 @@ var readTable map[byte]func(io.ByteScanner) Literal
 
 /// lisp types
 
-type Value interface{}
+type Value interface {
+	literal() (Literal, os.Error)
+}
+
+type NonLiteral struct{}
 
 type Symbol struct {
 	name string
@@ -45,13 +48,15 @@ type Number float64
 
 type String string
 
-type Cons struct {
-	car, cdr Value
+type List struct {
+	head Value
+	tail *List
 }
 
-type Nil struct{}
+var emptyList = &List{Number(5), nil}
 
 type Template struct {
+	NonLiteral
 	name     string
 	nvars    int
 	freeRefs []FreeRef
@@ -59,20 +64,58 @@ type Template struct {
 }
 
 type Func struct {
+	NonLiteral
 	temp *Template
 	env  []Value
 }
 
 type Cont struct {
+	NonLiteral
 	stack Stack
 }
 
 type Cell struct {
+	NonLiteral
 	value Value
 }
 
 type Array struct {
+	NonLiteral
 	vector.Vector
+}
+
+func newTemplate(name string, nvars int, freeRefs []FreeRef, code []Instr) *Template {
+	return &Template{
+		name: name,
+		nvars: nvars,
+		freeRefs: freeRefs,
+		code: code,
+	}
+}
+
+func newFunc(temp *Template, env []Value) *Func {
+	return &Func{
+		temp: temp,
+		env: env,
+	}
+}
+
+func newCont(stack Stack) *Cont {
+	return &Cont{
+		stack: stack,
+	}
+}
+
+func newCell(x Value) *Cell {
+	return &Cell{
+		value: x,
+	}
+}
+
+func newArray(v vector.Vector) *Array {
+	return &Array{
+		Vector: v,
+	}
 }
 
 func symbolp(x Value) (ok bool) {
@@ -86,7 +129,7 @@ func numberp(x Value) (ok bool) {
 }
 
 func nilp(x Value) (ok bool) {
-	_, ok = x.(Nil)
+	ok = (x == Value(emptyList))
 	return
 }
 
@@ -95,7 +138,10 @@ func stringp(x Value) (ok bool) {
 	return
 }
 
-func consp(x Value) (ok bool) { _, ok = x.(*Cons); return }
+func consp(x Value) bool {
+	list, ok := x.(*List)
+	return ok && (list != emptyList)
+}
 
 func templatep(x Value) (ok bool) {
 	_, ok = x.(*Template)
@@ -141,30 +187,20 @@ func intern(name string) *Symbol {
 	return sym
 }
 
-/// lisp data accessors
-
-func car(x Value) (Value, os.Error) {
-	c, ok := x.(*Cons)
-	if !ok {
-		return nil, os.NewError("car: type error")
+func (list *List) len() int {
+	n := 0
+	for x := list; x != emptyList; x = x.tail {
+		n++
 	}
-	return c.car, nil
-}
-
-func cdr(x Value) (Value, os.Error) {
-	c, ok := x.(*Cons)
-	if !ok {
-		return nil, os.NewError("cdr: type error")
-	}
-	return c.cdr, nil
+	return n
 }
 
 /// conversion
 
 func list(elements ...Value) Value {
-	x := Value(Nil{})
+	x := emptyList
 	for i := len(elements) - 1; i >= 0; i-- {
-		x = &Cons{elements[i], x}
+		x = &List{elements[i], x}
 	}
 	return x
 }
@@ -190,7 +226,7 @@ func tuple(x Value, preds ...func(Value) bool) (*Array, os.Error) {
 		return nil, os.NewError("tuple: bad argument")
 	}
 	for i, pred := range preds {
-		if !pred(a.At(i)) {
+		if !pred(a.At(i).(Value)) {
 			return nil, os.NewError("tuple: bad argument")
 		}
 	}
@@ -200,32 +236,29 @@ func tuple(x Value, preds ...func(Value) bool) (*Array, os.Error) {
 /// combinators
 
 func forEach(x Value, f func(Value) os.Error) os.Error {
-	for {
-		switch z := x.(type) {
-		case Nil:
-			return nil
-		case *Cons:
-			err := f(z.car)
-			if err != nil {
-				return err
-			}
-			x = z.cdr
-		default:
-			return os.NewError("bad list")
+	list, ok := x.(*List)
+	if !ok {
+		return os.NewError("forEach: type error")
+	}
+	for list != emptyList {
+		err := f(list.head)
+		if err != nil {
+			return err
 		}
+		list = list.tail
 	}
 	return nil
 }
 
-func listMap(x Value, f func(Value) Value) Value {
-	switch z := x.(type) {
-	case Nil:
-		return Nil{}
-	case *Cons:
-		return &Cons{f(z.car), listMap(z.cdr, f)}
+func listMap(x Value, f func(Value) *List) *List {
+	list, ok := x.(*List)
+	if !ok {
+		panic("listMap: type error")
 	}
-	panic("listMap: unexpected non-list argument")
-	return Nil{}
+	if list == emptyList {
+		return emptyList
+	}
+	return &List{f(list.head), listMap(list.tail, f)}
 }
 
 /// interpreter
@@ -258,9 +291,9 @@ func newContinuationInstr() Instr {
 
 func (*continuationInstr) Exec(m *Machine) {
 	stack := m.stack.Slice(0, m.stack.Len()-1)
-	m.a = &Cont{
+	m.a = newCont(
 		Stack{*stack},
-	}
+	)
 }
 
 func (instr *continuationInstr) Sexp() Value {
@@ -279,7 +312,7 @@ func (instr *closeInstr) Exec(m *Machine) {
 	freeRefs := instr.temp.freeRefs
 	n := len(freeRefs)
 	if n == 0 {
-		m.a = &Func{instr.temp, nil}
+		m.a = newFunc(instr.temp, nil)
 		return
 	}
 	env := make([]Value, n)
@@ -296,7 +329,7 @@ func (instr *closeInstr) Exec(m *Machine) {
 			return
 		}
 	}
-	m.a = &Func{instr.temp, env}
+	m.a = newFunc(instr.temp, env)
 }
 
 func (instr *closeInstr) Sexp() Value {
@@ -351,22 +384,22 @@ func newApplyInstr(arg interface{}) Instr {
 }
 
 func (m *Machine) prepareApplyArgs(nvars int) {
-	rest := m.stack.Pop().(Value)
+	rest, ok := m.stack.Pop().(*List)
+	if !ok {
+		m.throw("apply: type error")
+		return
+	}
 	for i := 0; i < nvars; i++ {
-		switch x := rest.(type) {
-		case Nil:
-			m.throw("too few arguments")
-			return
-		case *Cons:
-			m.stack.Push(x.car)
-			rest = x.cdr
-		default:
-			m.throw("bad argument list")
+		if rest == emptyList {
+			m.throw("apply: too few arguments")
 			return
 		}
+		m.stack.Push(rest.head)
+		rest = rest.tail
 	}
-	if !nilp(rest) {
-		m.throw("too many arguments")
+	if rest != emptyList {
+		m.throw("apply: too many arguments")
+		return
 	}
 }
 
@@ -399,7 +432,7 @@ func (m *Machine) applyFunc(f *Func, nargs int) {
 
 func (m *Machine) applyCont(c *Cont) {
 	ret := returnInstr{}
-	m.a = m.stack.At(m.stack.Len() - 1)
+	m.a = m.stack.At(m.stack.Len() - 1).(Value)
 	m.stack = Stack{c.stack.Copy()}
 	m.fp = m.stack.Len()
 	ret.Exec(m)
@@ -643,16 +676,16 @@ func (m *Machine) throw(s string) {
 func freshStack() Stack {
 	var s Stack
 	s.Push(
-		&Func{
-			&Template{
+		newFunc(
+			newTemplate(
 				"halt", 0, nil,
 				[]Instr{
 					&constInstr{intern("normal")},
 					&haltInstr{},
 				},
-			},
+			),
 			nil,
-		},
+		),
 	)
 	s.Push(0)
 	s.Push(0)
@@ -662,7 +695,7 @@ func freshStack() Stack {
 func newMachine(f *Func) *Machine {
 	return &Machine{
 		RUNNING, f, 3, 0,
-		freshStack(), Nil{},
+		freshStack(), emptyList,
 		f.temp.code, f.env,
 	}
 }
@@ -682,7 +715,7 @@ func truth(x bool) Value {
 	if x {
 		return intern("t")
 	}
-	return Nil{}
+	return emptyList
 }
 
 func primSymbolp(args ...Value) (Value, os.Error) {
@@ -729,19 +762,32 @@ func primSymbolName(args ...Value) (Value, os.Error) {
 }
 
 func primCons(args ...Value) (Value, os.Error) {
-	return &Cons{args[0], args[1]}, nil
+	if len(args) != 2 {
+		return nil, os.NewError("cons: wrong number of arguments")
+	}
+	tail, ok := args[1].(*List)
+	if !ok {
+		return nil, os.NewError("cons: type error")
+	}
+	return &List{args[0], tail}, nil
 }
 
 func primCar(args ...Value) (Value, os.Error) {
-	if c, ok := args[0].(*Cons); ok {
-		return c.car, nil
+	if list, ok := args[0].(*List); ok {
+		if list == emptyList {
+			return nil, os.NewError("car: nil")
+		}
+		return list.head, nil
 	}
 	return nil, os.NewError("car: type error")
 }
 
 func primCdr(args ...Value) (Value, os.Error) {
-	if c, ok := args[0].(*Cons); ok {
-		return c.cdr, nil
+	if list, ok := args[0].(*List); ok {
+		if list == emptyList {
+			return nil, os.NewError("cdr: nil")
+		}
+		return list.tail, nil
 	}
 	return nil, os.NewError("cdr: type error")
 }
@@ -769,7 +815,7 @@ func packFreeRefs(src Value) ([]FreeRef, os.Error) {
 	n := specs.Len()
 	freeRefs := make([]FreeRef, n)
 	for i := 0; i < n; i++ {
-		spec, err := tuple(specs.At(i), symbolp, numberp)
+		spec, err := tuple(specs.At(i).(Value), symbolp, numberp)
 		if err != nil {
 			return nil, os.NewError(
 				"packFreeRefs: bad argument",
@@ -788,14 +834,10 @@ func packFreeRefs(src Value) ([]FreeRef, os.Error) {
 	return freeRefs, nil
 }
 
-func makeInstr(opcode string, args Value) Instr {
-	arg := Value(Nil{})
-	if !nilp(args) {
-		var err os.Error
-		arg, err = car(args)
-		if err != nil {
-			panic("makeInstr: bad argument")
-		}
+func makeInstr(opcode string, args *List) Instr {
+	arg := Value(emptyList)
+	if args != emptyList {
+		arg = args.head
 	}
 	switch opcode {
 	case "continuation":
@@ -841,14 +883,14 @@ func packCode(src Value) ([]Instr, os.Error) {
 	code := make([]Instr, n)
 	for i := 0; i < n; i++ {
 		switch x := a.At(i).(type) {
-		case *Cons:
-			opcode, ok := x.car.(*Symbol)
+		case *List:
+			opcode, ok := x.head.(*Symbol)
 			if !ok {
 				return nil, os.NewError(
 					"packCode: non-symbol opcode",
 				)
 			}
-			code[i] = makeInstr(opcode.name, x.cdr)
+			code[i] = makeInstr(opcode.name, x.tail)
 		default:
 			return nil, os.NewError("packCode: bad argument")
 		}
@@ -871,12 +913,12 @@ func primTemplateNew(args ...Value) (Value, os.Error) {
 	if err != nil {
 		return nil, os.NewError("templatenew: invalid code")
 	}
-	temp := &Template{
+	temp := newTemplate(
 		"",
 		nvars,
 		freeRefs,
 		code,
-	}
+	)
 	return temp, nil
 }
 
@@ -900,14 +942,14 @@ func primTemplateOpen(args ...Value) (Value, os.Error) {
 		return nil, os.NewError("templateopen: type error")
 	}
 	n := len(temp.freeRefs)
-	freeRefs := Value(Nil{})
+	freeRefs := emptyList
 	for i := n - 1; i >= 0; i-- {
-		freeRefs = &Cons{unpackFreeRef(temp.freeRefs[i]), freeRefs}
+		freeRefs = &List{unpackFreeRef(temp.freeRefs[i]), freeRefs}
 	}
-	code := Value(Nil{})
+	code := emptyList
 	n = len(temp.code)
 	for i := n - 1; i >= 0; i-- {
-		code = &Cons{unpackInstr(temp.code[i]), code}
+		code = &List{unpackInstr(temp.code[i]), code}
 	}
 	sexp := list(
 		intern("template"),
@@ -933,7 +975,7 @@ func primFuncNew(args ...Value) (Value, os.Error) {
 	for i := 0; i < n; i++ {
 		env[i] = envArray.At(i).(Value)
 	}
-	return &Func{temp, env}, nil
+	return newFunc(temp, env), nil
 }
 
 func primFuncOpen(args ...Value) (Value, os.Error) {
@@ -958,7 +1000,7 @@ func primContOpen(args ...Value) (Value, os.Error) {
 	if !ok {
 		return nil, os.NewError("contopen: type error")
 	}
-	stack := &Array{c.stack.Copy()}
+	stack := newArray(c.stack.Copy())
 	n := stack.Len()
 	for i := 0; i < n; i++ {
 		if n, ok := stack.At(i).(int); ok {
@@ -976,7 +1018,7 @@ func primArrayNew(args ...Value) (Value, os.Error) {
 	n := int(m)
 	a := new(Array)
 	for i := 0; i < n; i++ {
-		a.Push(Value(Nil{}))
+		a.Push(Value(emptyList))
 	}
 	return a, nil
 }
@@ -1004,7 +1046,7 @@ func primArrayPut(args ...Value) (Value, os.Error) {
 	}
 	x := args[2]
 	a.Set(int(i), x)
-	return Nil{}, nil
+	return emptyList, nil
 }
 
 func primArrayLength(args ...Value) (Value, os.Error) {
@@ -1016,7 +1058,7 @@ func primArrayLength(args ...Value) (Value, os.Error) {
 }
 
 func primCellNew(args ...Value) (Value, os.Error) {
-	return &Cell{args[0]}, nil
+	return newCell(args[0]), nil
 }
 
 func primCellGet(args ...Value) (Value, os.Error) {
@@ -1092,7 +1134,7 @@ func primAtoi(args ...Value) (Value, os.Error) {
 	}
 	var n float64
 	if _, err := fmt.Sscan(string(s), &n); err != nil {
-		return Nil{}, nil
+		return emptyList, nil
 	}
 	return Number(n), nil
 }
@@ -1175,24 +1217,10 @@ func primPow(args ...Value) (Value, os.Error) {
 }
 
 func primEq(args ...Value) (Value, os.Error) {
-	switch args[0].(type) {
-	case Nil:
-		return truth(nilp(args[1])), nil
-	}
-	if reflect.TypeOf(args[0]) != reflect.TypeOf(args[1]) {
-		return Nil{}, nil
-	}
 	return truth(args[0] == args[1]), nil
 }
 
 func primNeq(args ...Value) (Value, os.Error) {
-	switch args[0].(type) {
-	case Nil:
-		return truth(!nilp(args[1])), nil
-	}
-	if reflect.TypeOf(args[0]) != reflect.TypeOf(args[1]) {
-		return truth(true), nil
-	}
 	return truth(args[0] != args[1]), nil
 }
 
@@ -1284,7 +1312,7 @@ func primLog(args ...Value) (Value, os.Error) {
 		return nil, os.NewError("log: type error")
 	}
 	fmt.Println(string(s))
-	return Nil{}, nil
+	return emptyList, nil
 }
 
 type stringBody struct {
@@ -1355,16 +1383,16 @@ func primHttp(args ...Value) (Value, os.Error) {
 		}
 		return String(text), nil
 	case "put":
-		body, err := car(args[2])
-		if err != nil {
+		list, ok := args[2].(*List)
+		if !ok || list == emptyList {
 			return nil, os.NewError("http: bad argument")
 		}
-		bodyString, ok := body.(String)
+		bodyString, ok := list.head.(String)
 		if !ok {
 			return nil, os.NewError("http: bod argument")
 		}
 		httpPut(string(url), string(bodyString))
-		return Nil{}, nil
+		return emptyList, nil
 	}
 	return nil, os.NewError("http: unsupported method: " + method.name)
 }
@@ -1408,7 +1436,7 @@ func primExec(args ...Value) (Value, os.Error) {
 	if err != nil {
 		return nil, err
 	}
-	return Nil{}, nil
+	return emptyList, nil
 }
 
 func primExit(args ...Value) (Value, os.Error) {
@@ -1436,9 +1464,9 @@ func primReadAll(args ...Value) (val Value, err os.Error) {
 	}()
 	buf := bytes.NewBufferString(string(args[0].(String)))
 	lits := newReadAll(buf)
-	acc := Value(Nil{})
+	acc := emptyList
 	for i := len(lits) - 1; i >= 0; i-- {
-		acc = &Cons{valueOfLiteral(lits[i]), acc}
+		acc = &List{lits[i].value(), acc}
 	}
 	return acc, nil
 }
@@ -1458,7 +1486,11 @@ func primCompile(args ...Value) (val Value, err os.Error) {
 		}
 		panic(x)
 	}()
-	return compile(parseExpr(literalOfValue(args[0])))
+	lit, err := args[0].literal()
+	if err != nil {
+		err = os.NewError("compile: type error")
+	}
+	return compile(parseExpr(lit))
 }
 
 var primDecls = [][]interface{}{
@@ -1526,22 +1558,22 @@ func makePrim(decl []interface{}) *Template {
 	name := parts[0]
 	nargs := len(parts) - 1
 	prim := decl[1].(func(...Value) (Value, os.Error))
-	return &Template{
+	return newTemplate(
 		name, nargs, nil,
 		[]Instr{
 			&primInstr{name, prim},
 			&returnInstr{},
 		},
-	}
+	)
 }
 
 func loadPrims() {
 	for _, decl := range primDecls {
 		temp := makePrim(decl)
-		define(temp.name, &Func{temp, nil})
+		define(temp.name, newFunc(temp, nil))
 	}
-	define("apply", &Func{
-		&Template{
+	define("apply", newFunc(
+		newTemplate(
 			"apply", 2, nil,
 			[]Instr{
 				&localInstr{1},
@@ -1550,11 +1582,11 @@ func loadPrims() {
 				&shiftInstr{},
 				&applyInstr{-1},
 			},
-		},
+		),
 		nil,
-	})
-	define("call/cc", &Func{
-		&Template{
+	))
+	define("call/cc", newFunc(
+		newTemplate(
 			"call/cc", 1, nil,
 			[]Instr{
 				&continuationInstr{},
@@ -1563,9 +1595,9 @@ func loadPrims() {
 				&shiftInstr{},
 				&applyInstr{1},
 			},
-		},
+		),
 		nil,
-	})
+	))
 }
 
 /// reader
@@ -1617,7 +1649,7 @@ loop:
 	}
 	atom := string(atomBuf)
 	if atom == "nil" {
-		return Nil{}
+		return newListLiteral()
 	}
 	n, err := strconv.Atof64(atom)
 	if err == nil {
@@ -1715,9 +1747,6 @@ func readList(buf io.ByteScanner) Literal {
 		items = append(items, read(buf))
 		skipws(buf)
 	}
-	if len(items) == 0 {
-		return Nil{}
-	}
 	return newListLiteral(items...)
 }
 
@@ -1752,112 +1781,131 @@ func newReadAll(r io.Reader) []Literal {
 	return items
 }
 
-func valueOfLiteral(lit Literal) Value {
-	if x, ok := lit.(*ListLiteral); ok {
-		z := Value(Nil{})
-		for i := len(x.items) - 1; i >= 0; i-- {
-			z = &Cons{valueOfLiteral(x.items[i]), z}
-		}
-		return z
-	}
-	return lit
-}
-
-func literalOfValue(val Value) Literal {
-	switch x := val.(type) {
-	case Nil:
-		return x
-	case Number:
-		return x
-	case String:
-		return x
-	case *Symbol:
-		return x
-	}
-	cons, ok := val.(*Cons)
-	if !ok {
-		panic("literalOfValue: nonliteral value")
-	}
-	items := []Literal{}
-	for {
-		items = append(items, literalOfValue(cons.car))
-		if nilp(cons.cdr) {
-			break
-		}
-		if !consp(cons.cdr) {
-			items = append(items, literalOfValue(cons.cdr))
-			return &ListLiteral{items}
-		}
-		cons, _ = cons.cdr.(*Cons)
-	}
-	return &ListLiteral{items}
-}
-
 type Literal interface {
+	value() Value
 	literalVariant()
 }
 
-// Invariants:
-//   len(items) > 0
 type ListLiteral struct {
-	items  []Literal
+	items []Literal
 }
 
 func newListLiteral(items ...Literal) *ListLiteral {
 	return &ListLiteral{items}
 }
 
-func (_ Nil) literalVariant()          {}
+func (list *ListLiteral) empty() bool {
+	return (len(list.items) == 0)
+}
+
+func (list *ListLiteral) head() Literal {
+	return list.items[0]
+}
+
+func (list *ListLiteral) tail() Literal {
+	return &ListLiteral{list.items[1:]}
+}
+
+func (list *ListLiteral) at(i int) Literal {
+	return list.items[i]
+}
+
+func (list *ListLiteral) len() int {
+	return len(list.items)
+}
+
 func (_ Number) literalVariant()       {}
 func (_ String) literalVariant()       {}
 func (_ *Symbol) literalVariant()      {}
 func (_ *ListLiteral) literalVariant() {}
 
+func (n Number) literal() (Literal, os.Error) {
+	return n, nil
+}
+
+func (s String) literal() (Literal, os.Error) {
+	return s, nil
+}
+
+func (s *Symbol) literal() (Literal, os.Error) {
+	return s, nil
+}
+
+func (list *List) literal() (Literal, os.Error) {
+	items := make([]Literal, list.len())
+	rest := list
+	for i := 0; i < len(items); i++ {
+		var err os.Error
+		items[i], err = rest.head.literal()
+		if err != nil {
+			return nil, err
+		}
+		rest = rest.tail
+	}
+	return &ListLiteral{items}, nil
+}
+
+func (_ NonLiteral) literal() (Literal, os.Error) {
+	return nil, os.NewError("not a literal")
+}
+
+func (n Number) value() Value {
+	return n
+}
+
+func (s String) value() Value {
+	return s
+}
+
+func (s *Symbol) value() Value {
+	return s
+}
+
+func (x *ListLiteral) value() Value {
+	tail := emptyList
+	for i := x.len() - 1; i >= 0; i-- {
+		tail = &List{x.at(i).value(), tail}
+	}
+	return tail
+}
+
 func parseCallExpr(form *ListLiteral) Expr {
-	forms := form.items
-	if len(forms) < 1 {
+	if form.empty() {
 		panic("parseExpr: empty call")
 	}
-	funcExpr := parseExpr(forms[0])
-	argExprs := parseEach(forms[1:])
+	funcExpr := parseExpr(form.head())
+	argExprs := parseEach(form.items[1:])
 	return CallExpr{funcExpr, argExprs}
 }
 
 func parseParams(lit Literal) []*Symbol {
-	switch x := lit.(type) {
-	case Nil:
-		return []*Symbol{}
-	case *ListLiteral:
-		params := make([]*Symbol, len(x.items))
-		for i, item := range x.items {
-			var ok bool
-			params[i], ok = item.(*Symbol)
-			if !ok {
-				panic("parseExpr: bad parameter")
-			}
-		}
-		return params
+	x, ok := lit.(*ListLiteral)
+	if !ok {
+		panic("parseExpr: ill-formed parameter list")
 	}
-	panic("parseExpr: ill-formed parameter list")
-	return []*Symbol{}
+	params := make([]*Symbol, x.len())
+	for i, item := range x.items {
+		params[i], ok = item.(*Symbol)
+		if !ok {
+			panic("parseExpr: bad parameter")
+		}
+	}
+	return params
 }
 
 func parseInits(lit Literal) []InitPair {
 	list, ok := lit.(*ListLiteral)
-	if !ok || len(list.items) == 0 {
+	if !ok || list.empty() {
 		panic("parseExpr: ill-formed init list")
 	}
-	inits := make([]InitPair, len(list.items))
+	inits := make([]InitPair, list.len())
 	for i, item := range list.items {
 		pair, ok := item.(*ListLiteral)
-		if !ok || len(pair.items) != 2 {
+		if !ok || pair.len() != 2 {
 			panic("parseExpr: ill-formed init list")
 		}
-		inits[i].name, ok = pair.items[0].(*Symbol)
-		if !ok {
-			panic("parseExpr: ill-formed init list")
-		}
-		inits[i].expr = parseExpr(pair.items[1])
+		inits[i].name, ok = pair.head().(*Symbol)
+		inits[i].expr = parseExpr(pair.at(1))
 	}
 	return inits
 }
@@ -1872,102 +1920,73 @@ func parseEach(forms []Literal) []Expr {
 
 func parseCondClause(form Literal) CondClause {
 	list, ok := form.(*ListLiteral)
-	if !ok || len(list.items) < 2 {
+	if !ok || list.len() < 2 {
 		panic("parseExpr: ill-formed cond clause")
 	}
 	return CondClause{
-		parseExpr(list.items[0]),
+		parseExpr(list.head()),
 		parseEach(list.items[1:]),
 	}
 }
 
 func analyzeUnquotesplicing(lit Literal) (Literal, bool) {
-	var head *Symbol
-	x, ok := lit.(*ListLiteral)
-	if !ok {
-		goto nomatch
+	form, ok := lit.(*ListLiteral)
+	if !ok || form.len() != 2 {
+		return nil, false
 	}
-	if len(x.items) != 2 {
-		goto nomatch
+	if form.head() == Literal(intern("unquotesplicing")) {
+		return form.at(1), true
 	}
-	head, ok = x.items[0].(*Symbol)
-	if !ok {
-		goto nomatch
-	}
-	if head == intern("unquotesplicing") {
-		return x.items[1], true
-	}
-nomatch:
-	return Nil{}, false
+	return nil, false
 }
 
 func expandQuasi(lit Literal) Literal {
-	switch x := lit.(type) {
-	case Nil:
-		return x
+	switch lit.(type) {
 	case Number:
-		return x
+		return lit
 	case String:
-		return x
+		return lit
 	case *Symbol:
-		return newListLiteral(intern("quote"), x)
+		return newListLiteral(intern("quote"), lit)
 	}
-	x, ok := lit.(*ListLiteral)
-	if !ok {
-		panic("expandQuasi: unexpected literal type")
+	x := lit.(*ListLiteral)
+	if x.empty() {
+		return lit
 	}
-	if head, ok := x.items[0].(*Symbol); ok {
-		if head == intern("unquote") {
-			if len(x.items) != 2 {
-				panic("expandQuasi: ill-formed unquote")
-			}
-			return x.items[1]
+	head := x.head()
+	if head == Literal(intern("unquote")) {
+		if x.len() != 2 {
+			panic("expandQuasi: ill-formed unquote")
 		}
-		if head == intern("quasiquote") {
-			if len(x.items) != 2 {
-				panic("expandQuasi: ill-formed quasiquote")
-			}
-			return expandQuasi(expandQuasi(x.items[1]))
-		}
+		return x.at(1)
 	}
-	var acc Literal
-	item := x.items[len(x.items) - 1]
-	if subLit, ok := analyzeUnquotesplicing(item); ok {
-		acc = subLit
-	} else {
-		acc = newListLiteral(
-			intern("cons"),
-			expandQuasi(item),
-			Nil{},
+	if head == Literal(intern("quasiquote")) {
+		if x.len() != 2 {
+			panic("expandQuasi: ill-formed quasiquote")
+		}
+		return expandQuasi(expandQuasi(x.at(1)))
+	}
+	if subLit, ok := analyzeUnquotesplicing(head); ok {
+		return newListLiteral(
+			intern("append"),
+			subLit,
+			expandQuasi(x.tail()),
 		)
 	}
-	for i := len(x.items) - 2; i >= 0; i-- {
-		item = x.items[i]
-		subLit, ok := analyzeUnquotesplicing(item)
-		if ok {
-			acc = newListLiteral(
-				intern("append"),
-				subLit,
-				acc,
-			)
-			continue
-		}
-		acc = newListLiteral(
-			intern("cons"),
-			expandQuasi(item),
-			acc,
-		)
-	}
-	return acc
+	return newListLiteral(
+		intern("cons"),
+		expandQuasi(head),
+		expandQuasi(x.tail()),
+	)
 }
 
 func parseMatchClause(lit Literal) MatchClause {
 	var clause MatchClause
 	x, ok := lit.(*ListLiteral)
-	if !ok || len(x.items) < 2 {
+	if !ok || x.len() < 2 {
 		panic("parseExpr: ill-formed match clause")
 	}
-	sym, ok := x.items[0].(*Symbol)
+	sym, ok := x.head().(*Symbol)
 	if ok && sym == intern("t") {
 		// TODO - this is awkward
 		clause.tag = sym
@@ -1975,21 +1994,20 @@ func parseMatchClause(lit Literal) MatchClause {
 		clause.body = parseEach(x.items[1:])
 		return clause
 	}
-	pattern, ok := x.items[0].(*ListLiteral)
-	if !ok || len(pattern.items) < 1 {
+	pattern, ok := x.head().(*ListLiteral)
+	if !ok || pattern.empty() {
 		panic("parseExpr: ill-formed match clause")
 	}
-	clause.tag, ok = pattern.items[0].(*Symbol)
+	clause.tag, ok = pattern.head().(*Symbol)
 	if !ok {
 		panic("parseExpr: ill-formed match clause")
 	}
-	clause.params = make([]*Symbol, len(pattern.items[1:]))
+	clause.params = make([]*Symbol, pattern.len()-1)
 	for i, item := range pattern.items[1:] {
-		sym, ok := item.(*Symbol)
+		clause.params[i], ok = item.(*Symbol)
 		if !ok {
 			panic("parseExpr: ill-formed match clause")
 		}
-		clause.params[i] = sym
 	}
 	clause.body = parseEach(x.items[1:])
 	return clause
@@ -1997,125 +2015,125 @@ func parseMatchClause(lit Literal) MatchClause {
 
 func parseExpr(lit Literal) Expr {
 	switch x := lit.(type) {
-	case Nil:
-		return QuoteExpr{x}
 	case Number:
 		return QuoteExpr{x}
 	case String:
 		return QuoteExpr{x}
 	case *Symbol:
 		return RefExpr{x}
-	case *ListLiteral:
-		if len(x.items) == 0 {
-			panic("parseExpr: empty expression")
-		}
-		head, ok := x.items[0].(*Symbol)
-		if !ok {
-			return parseCallExpr(x)
-		}
-		if head == intern("quasiquote") {
-			if len(x.items) != 2 {
-				panic("parseExpr: ill-formed quasiquote")
-			}
-			return parseExpr(expandQuasi(x.items[1]))
-		}
-		if head == intern("ampersand") {
-			if len(x.items) != 2 {
-				panic("parseExpr: ill-formed ampersand")
-			}
-			switch list := x.items[1].(type) {
-			case Nil:
-				return AmpersandExpr{[]Expr{}}
-			case *ListLiteral:
-				return AmpersandExpr{parseEach(list.items)}
-			}
-			panic("parseExpr: ill-formed ampersand")
-		}
-		if head == intern("quote") {
-			if len(x.items) != 2 {
-				panic("parseExpr: ill-formed quote")
-			}
-			return QuoteExpr{valueOfLiteral(x.items[1])}
-		}
-		if head == intern("if") {
-			if len(x.items) != 4 {
-				panic("parseExpr: ill-formed if")
-			}
-			return IfExpr{
-				parseExpr(x.items[1]),
-				parseExpr(x.items[2]),
-				parseExpr(x.items[3]),
-			}
-		}
-		if head == intern("begin") {
-			if len(x.items) < 2 {
-				panic("parseExpr: ill-formed begin")
-			}
-			body := parseEach(x.items[1:])
-			return BeginExpr{body}
-		}
-		if head == intern("jmp") {
-			if len(x.items) != 2 {
-				panic("parseExpr: ill-formed jmp")
-			}
-			return JmpExpr{parseExpr(x.items[1])}
-		}
-		if head == intern("func") {
-			if len(x.items) < 3 {
-				panic("parseExpr: ill-formed func")
-			}
-			params := parseParams(x.items[1])
-			body := parseEach(x.items[2:])
-			return FuncExpr{params, body}
-		}
-		if head == intern("let") {
-			if len(x.items) < 3 {
-				panic("parseExpr: ill-formed let")
-			}
-			inits := parseInits(x.items[1])
-			body := parseEach(x.items[2:])
-			return LetExpr{inits, body}
-		}
-		if head == intern("define") {
-			if len(x.items) != 3 {
-				panic("parseExpr: ill-formed define")
-			}
-			sym, ok := x.items[1].(*Symbol)
-			if !ok {
-				panic("parseExpr: ill-formed define")
-			}
-			return DefineExpr{sym, parseExpr(x.items[2])}
-		}
-		if head == intern("cond") {
-			clauses := make([]CondClause, len(x.items[1:]))
-			for i, item := range x.items[1:] {
-				clauses[i] = parseCondClause(item)
-			}
-			return CondExpr{clauses}
-		}
-		if head == intern("and") {
-			return AndExpr{parseEach(x.items[1:])}
-		}
-		if head == intern("or") {
-			return OrExpr{parseEach(x.items[1:])}
-		}
-		if head == intern("match") {
-			if len(x.items) < 3 {
-				panic("parseExpr: ill-formed match")
-			}
-			clauses := make([]MatchClause, len(x.items[2:]))
-			for i, item := range x.items[2:] {
-				clauses[i] = parseMatchClause(item)
-			}
-			return MatchExpr{
-				parseExpr(x.items[1]),
-				clauses,
-			}
-		}
+	}
+	x, ok := lit.(*ListLiteral)
+	if !ok {
+		panic("parseExpr: nonliteral")
+	}
+	if x.empty() {
+		return QuoteExpr{emptyList}
+	}
+	head, ok := x.head().(*Symbol)
+	if !ok {
 		return parseCallExpr(x)
 	}
-	panic("parseExpr: unmatched literal")
-	return QuoteExpr{Nil{}}
+	if head == Literal(intern("quasiquote")) {
+		if x.len() != 2 {
+			panic("parseExpr: ill-formed quasiquote")
+		}
+		return parseExpr(expandQuasi(x.at(1)))
+	}
+	if head == Literal(intern("ampersand")) {
+		if x.len() != 2 {
+			panic("parseExpr: ill-formed ampersand")
+		}
+		list, ok := x.at(1).(*ListLiteral)
+		if !ok {
+			panic("parseExpr: ill-formed ampersand")
+		}
+		return AmpersandExpr{parseEach(list.items)}
+	}
+	if head == intern("quote") {
+		if x.len() != 2 {
+			panic("parseExpr: ill-formed quote")
+		}
+		return QuoteExpr{x.at(1).value()}
+	}
+	if head == intern("if") {
+		if x.len() != 4 {
+			panic("parseExpr: ill-formed if")
+		}
+		return IfExpr{
+			parseExpr(x.at(1)),
+			parseExpr(x.at(2)),
+			parseExpr(x.at(3)),
+		}
+	}
+	if head == intern("begin") {
+		if x.len() < 2 {
+			panic("parseExpr: ill-formed begin")
+		}
+		body := parseEach(x.items[1:])
+		return BeginExpr{body}
+	}
+	if head == intern("jmp") {
+		if x.len() != 2 {
+			panic("parseExpr: ill-formed jmp")
+		}
+		return JmpExpr{parseExpr(x.at(1))}
+	}
+	if head == intern("func") {
+		if x.len() < 3 {
+			panic("parseExpr: ill-formed func")
+		}
+		params := parseParams(x.at(1))
+		body := parseEach(x.items[2:])
+		return FuncExpr{params, body}
+	}
+	if head == intern("let") {
+		if x.len() < 3 {
+			panic("parseExpr: ill-formed let")
+		}
+		inits := parseInits(x.at(1))
+		body := parseEach(x.items[2:])
+		return LetExpr{inits, body}
+	}
+	if head == intern("define") {
+		if x.len() != 3 {
+			panic("parseExpr: ill-formed define")
+		}
+		sym, ok := x.at(1).(*Symbol)
+		if !ok {
+			panic("parseExpr: ill-formed define")
+		}
+		return DefineExpr{sym, parseExpr(x.at(2))}
+	}
+	if head == intern("cond") {
+		if x.len() < 2 {
+			panic("parseExpr: ill-formed cond")
+		}
+		clauses := make([]CondClause, x.len()-1)
+		for i, item := range x.items[1:] {
+			clauses[i] = parseCondClause(item)
+		}
+		return CondExpr{clauses}
+	}
+	if head == intern("and") {
+		return AndExpr{parseEach(x.items[1:])}
+	}
+	if head == intern("or") {
+		return OrExpr{parseEach(x.items[1:])}
+	}
+	if head == intern("match") {
+		if x.len() < 3 {
+			panic("parseExpr: ill-formed match")
+		}
+		clauses := make([]MatchClause, x.len()-2)
+		for i, item := range x.items[2:] {
+			clauses[i] = parseMatchClause(item)
+		}
+		return MatchExpr{
+			parseExpr(x.at(1)),
+			clauses,
+		}
+	}
+	return parseCallExpr(x)
 }
 
 type Expr interface {
@@ -2242,7 +2260,7 @@ func (_ MatchExpr) macroExprVariant() {}
 func (_ QuasiExpr) macroExprVariant() {}
 
 func (expr AmpersandExpr) expand() Expr {
-	acc := Expr(QuoteExpr{Nil{}})
+	acc := Expr(QuoteExpr{emptyList})
 	for i := len(expr.exprs) - 1; i >= 0; i-- {
 		acc = CallExpr{
 			RefExpr{intern("cons")},
@@ -2276,7 +2294,7 @@ func (expr DefineExpr) expand() Expr {
 }
 
 func (expr CondExpr) expand() Expr {
-	acc := Expr(QuoteExpr{Nil{}})
+	acc := Expr(QuoteExpr{emptyList})
 	clauses := expr.clauses
 	for i := len(clauses) - 1; i >= 0; i-- {
 		acc = IfExpr{
@@ -2294,14 +2312,14 @@ func (expr AndExpr) expand() Expr {
 		acc = IfExpr{
 			expr.exprs[i],
 			acc,
-			QuoteExpr{Nil{}},
+			QuoteExpr{emptyList},
 		}
 	}
 	return acc
 }
 
 func (expr OrExpr) expand() Expr {
-	acc := Expr(QuoteExpr{Nil{}})
+	acc := Expr(QuoteExpr{emptyList})
 	for i := len(expr.exprs) - 1; i >= 0; i-- {
 		acc = IfExpr{
 			expr.exprs[i],
@@ -2739,12 +2757,7 @@ func compExpr(expr Expr, env *CompEnv, argp bool, tailp int) []Asm {
 		nvars := len(expr.params)
 		funcEnv, freeRefs := analyzeRefs(env, expr.params, expr.body)
 		code := assemble(compExpr(body, funcEnv, false, TAIL))
-		temp := &Template{
-			name:     "",
-			nvars:    nvars,
-			freeRefs: freeRefs,
-			code:     code,
-		}
+		temp := newTemplate("", nvars, freeRefs, code)
 		return seq(
 			gen(newCloseAsm(temp)),
 			genReturn(argp, tailp),
@@ -2800,12 +2813,7 @@ func compile(expr Expr) (temp *Template, err os.Error) {
 	}()
 	core := macroexpandall(expr)
 	code := assemble(compExpr(core, newEmptyEnv(), false, TAIL))
-	temp = &Template{
-		name:     "",
-		nvars:    0,
-		freeRefs: []FreeRef{},
-		code:     code,
-	}
+	temp = newTemplate("", 0, []FreeRef{}, code)
 	return
 }
 
@@ -2856,7 +2864,7 @@ func macroexpandall(expr Expr) Expr {
 		}
 	}
 	panic("macroexpandall: unexpected expression")
-	return QuoteExpr{Nil{}}
+	return QuoteExpr{emptyList}
 }
 
 /// loading
@@ -2874,10 +2882,10 @@ func topFunc(temps []*Template) *Func {
 		code[i+2] = &applyInstr{0}
 	}
 	code[3*n] = &returnInstr{}
-	return &Func{
-		&Template{"", 0, nil, code},
+	return newFunc(
+		newTemplate("", 0, nil, code),
 		nil,
-	}
+	)
 }
 
 func fetchSourceModule(name, address string) (mod *Module, err os.Error) {
@@ -2930,7 +2938,7 @@ func initReader() {
 	}
 }
 func initInterpreter() {
-	unboundGlobalValue = &Cons{Nil{}, Nil{}}
+	unboundGlobalValue = &List{emptyList, emptyList}
 	sharedPrimStack = make([]Value, 8)
 	globals = make(map[string]*Binding)
 	symbolTable = make(map[string]*Symbol)

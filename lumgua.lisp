@@ -125,16 +125,6 @@
      ((= n 0) (car x))
      (t (nth (- n 1) (cdr x))))))
 
-(define maketruelist
-  (func (x)
-    (cond
-     ((nilp x)
-      nil)
-     ((consp x)
-      (cons (car x) (maketruelist (cdr x))))
-     (t
-      &(x)))))
-
 (define lookup
   (func (key x)
     (cond
@@ -161,25 +151,12 @@
 			      (t c))))))
       (cellget se))))
 
-(define improperfoldl
-  (func (f g z x)
-    (jmp (cond
-	  ((consp x)
-	   (improperfoldl f g (f z (car x)) (cdr x)))
-	  ((nilp x)
-	   z)
-	  (t
-	   (g z x))))))
-
 (define writecons
   (func (x)
-    (let ((inards (improperfoldl
-		   (func (z e)
-		     (strcat &(z " " (write e))))
-		   (func (z e)
-		     (strcat &(z " . " (write e))))
-		   (write (car x))
-		   (cdr x))))
+    (let ((inards (foldl (func (z e)
+			   (strcat &(z " " (write e))))
+			 (write (car x))
+			 (cdr x))))
       (strcat &("(" inards ")")))))
 
 (define write
