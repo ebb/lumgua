@@ -153,7 +153,7 @@
 
 (define strextend
   (func (cell str)
-    (cellput cell (strcat (cellget cell) str))))
+    (cellput cell (strcat &((cellget cell) str)))))
 
 (define escape
   (func (s)
@@ -184,12 +184,12 @@
   (func (x)
     (let ((inards (improperfoldl
 		   (func (z e)
-		     (strcat z " " (write e)))
+		     (strcat &(z " " (write e))))
 		   (func (z e)
-		     (strcat z " . " (write e)))
+		     (strcat &(z " . " (write e))))
 		   (write (car x))
 		   (cdr x))))
-      (strcat "(" inards ")"))))
+      (strcat &("(" inards ")")))))
 
 (define write
   (func (x)
@@ -201,7 +201,7 @@
      ((templatep x) "<template>")
      ((funcp x) "<func>")
      ((contp x) "<cont>")
-     ((stringp x) (strcat "\"" (escape x) "\""))
+     ((stringp x) (strcat &("\"" (escape x) "\"")))
      ((cellp x) "<cell>")
      ((arrayp x) "<array>")
      (t (throw "write: unknown type")))))
@@ -260,7 +260,7 @@
 					       (cc s))))))
 		    "entering REPL")))
     (loop (func ()
-	    (let ((text (http 'get "http://localhost:8082/eval")))
+	    (let ((text (http 'get "http://localhost:8082/eval" &())))
 	      (let ((exps (readall text)))
 		(foreach (func (exp)
 			   (log (write ((funcnew (compile exp)
@@ -280,11 +280,10 @@
 
 (define tabify
   (func (vals)
-    (apply strcat
-	   (cons (write (car vals))
-		 (map (func (val)
-			(strcat "\t" (write val)))
-		      (cdr vals))))))
+    (strcat (cons (write (car vals))
+		  (map (func (val)
+			 (strcat &("\t" (write val))))
+		       (cdr vals))))))
 
 (define showinstr
   (func (pc instr)
@@ -306,10 +305,10 @@
 	   ((close template)
 	    (showtemplate template (cdr nesting)))))
 	(t
-	 (log (strcat "name: " name))
-	 (log (strcat "nvars: " (write nvars)))
-	 (log (strcat "dottedp: " (write dottedp)))
-	 (log (strcat "freerefs: " (write freerefs)))
+	 (log (strcat &("name: " name)))
+	 (log (strcat &("nvars: " (write nvars))))
+	 (log (strcat &("dottedp: " (write dottedp))))
+	 (log (strcat &("freerefs: " (write freerefs))))
 	 (foldl (func (pc instr)
 		  (showinstr pc instr)
 		  (+ pc 1))
