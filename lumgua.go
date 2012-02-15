@@ -1680,7 +1680,15 @@ func readComma(buf io.ByteScanner) Literal {
 }
 
 func readAmpersand(buf io.ByteScanner) Literal {
-	x := read(buf)
+	skipws(buf)
+	b, err := buf.ReadByte()
+	if err != nil {
+		panic("read: incomplete input")
+	}
+	if b != '(' {
+		panic("read: ill-formed ampersand")
+	}
+	x := readList(buf)
 	return newListLiteral(false, intern("ampersand"), x)
 }
 
@@ -2081,11 +2089,13 @@ func parseExpr(lit Literal) Expr {
 			if len(x.items) != 2 {
 				panic("parseExpr: ill-formed ampersand")
 			}
-			list, ok := x.items[1].(*ListLiteral)
-			if !ok || list.dotted {
-				panic("parseExpr: ill-formed ampersand")
+			switch list := x.items[1].(type) {
+			case Nil:
+				return AmpersandExpr{[]Expr{}}
+			case *ListLiteral:
+				return AmpersandExpr{parseEach(list.items)}
 			}
-			return AmpersandExpr{parseEach(list.items)}
+			panic("parseExpr: ill-formed ampersand")
 		}
 		if head == intern("quote") {
 			if len(x.items) != 2 {
