@@ -152,8 +152,8 @@
      (t (jmp (lookup key (cdr x)))))))
 
 (define strextend
-  (func (cell . strs)
-    (cellput cell (apply strcat (cons (cellget cell) strs)))))
+  (func (cell str)
+    (cellput cell (strcat (cellget cell) str))))
 
 (define escape
   (func (s)
@@ -161,14 +161,13 @@
 	  (se (cellnew "")))
       (for 0 n
 	   (func (i)
-	     (strextend
-	      se (let ((c (strget s i)))
-		   (cond
-		    ((= c "\\") "\\\\")
-		    ((= c "\"") "\\\"")
-		    ((= c "\n") "\\n")
-		    ((= c "\t") "\\t")
-		    (t c))))))
+	     (strextend se (let ((c (strget s i)))
+			     (cond
+			      ((= c "\\") "\\\\")
+			      ((= c "\"") "\\\"")
+			      ((= c "\n") "\\n")
+			      ((= c "\t") "\\t")
+			      (t c))))))
       (cellget se))))
 
 (define improperfoldl
@@ -232,8 +231,8 @@
 			      (for (cellget fp)
 				   (+ (cellget fp) (+ nvars (if dottedp 1 0)))
 				   (func (i)
-				     (strextend s " "
-						(write (arrayget stack i)))))
+				     (strextend s " ")
+				     (strextend s (write (arrayget stack i)))))
 			      (strextend s ")")
 			      (log (cellget s)))))))))))))))))
 
@@ -292,21 +291,20 @@
     (log (tabify (cons pc instr)))))
 
 (define showfunc
-  (func (f . nesting)
+  (func (f nesting)
     (match (funcopen f)
       ((func temp env)
-       (apply showtemplate (cons temp nesting))))))
+       (showtemplate temp nesting)))))
 
 (define showtemplate
-  (func (template . nesting)
+  (func (template nesting)
     (match (templateopen template)
       ((template name nvars dottedp freerefs code)
        (cond
 	((consp nesting)
 	 (match (nth (car nesting) code)
 	   ((close template)
-	    (apply showtemplate
-		   (cons template (cdr nesting))))))
+	    (showtemplate template (cdr nesting)))))
 	(t
 	 (log (strcat "name: " name))
 	 (log (strcat "nvars: " (write nvars)))
