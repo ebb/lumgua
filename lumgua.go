@@ -1679,6 +1679,11 @@ func readComma(buf io.ByteScanner) Literal {
 	return newListLiteral(false, tag, x)
 }
 
+func readAmpersand(buf io.ByteScanner) Literal {
+	x := read(buf)
+	return newListLiteral(false, intern("ampersand"), x)
+}
+
 func readString(buf io.ByteScanner) Literal {
 	strbuf := []byte{}
 loop:
@@ -1975,13 +1980,16 @@ func expandQuasi(lit Literal) Literal {
 			return expandQuasi(expandQuasi(x.items[1]))
 		}
 	}
+	var acc Literal
 	item := x.items[len(x.items) - 1]
-	acc := expandQuasi(item)
-	if !x.dotted {
+	if subLit, ok := analyzeUnquotesplicing(item); ok {
+		acc = subLit
+	} else {
 		acc = newListLiteral(
 			false,
-			intern("list"),
-			acc,
+			intern("cons"),
+			expandQuasi(item),
+			Nil{},
 		)
 	}
 	for i := len(x.items) - 2; i >= 0; i-- {
@@ -2068,6 +2076,16 @@ func parseExpr(lit Literal) Expr {
 				panic("parseExpr: ill-formed quasiquote")
 			}
 			return parseExpr(expandQuasi(x.items[1]))
+		}
+		if head == intern("ampersand") {
+			if len(x.items) != 2 {
+				panic("parseExpr: ill-formed ampersand")
+			}
+			list, ok := x.items[1].(*ListLiteral)
+			if !ok || list.dotted {
+				panic("parseExpr: ill-formed ampersand")
+			}
+			return AmpersandExpr{parseEach(list.items)}
 		}
 		if head == intern("quote") {
 			if len(x.items) != 2 {
@@ -2168,6 +2186,10 @@ type QuoteExpr struct {
 	x Value
 }
 
+type AmpersandExpr struct {
+	exprs []Expr
+}
+
 type IfExpr struct {
 	condExpr Expr
 	thenExpr Expr
@@ -2245,6 +2267,7 @@ type QuasiExpr struct {
 	expr Expr
 }
 
+func (_ AmpersandExpr) exprVariant() {}
 func (_ LetExpr) exprVariant()   {}
 func (_ DefineExpr) exprVariant() {}
 func (_ CondExpr) exprVariant() {}
@@ -2266,6 +2289,7 @@ type MacroExpr interface {
 	macroExprVariant()
 }
 
+func (_ AmpersandExpr) macroExprVariant() {}
 func (_ LetExpr) macroExprVariant() {}
 func (_ DefineExpr) macroExprVariant() {}
 func (_ CondExpr) macroExprVariant() {}
@@ -2274,6 +2298,20 @@ func (_ OrExpr) macroExprVariant() {}
 func (_ MatcherExpr) macroExprVariant() {}
 func (_ MatchExpr) macroExprVariant() {}
 func (_ QuasiExpr) macroExprVariant() {}
+
+func (expr AmpersandExpr) expand() Expr {
+	acc := Expr(QuoteExpr{Nil{}})
+	for i := len(expr.exprs) - 1; i >= 0; i-- {
+		acc = CallExpr{
+			RefExpr{intern("cons")},
+			[]Expr{
+				expr.exprs[i],
+				acc,
+			},
+		}
+	}
+	return acc
+}
 
 func (expr LetExpr) expand() Expr {
 	params := make([]*Symbol, len(expr.inits))
@@ -2956,6 +2994,7 @@ func initReader() {
 		'\'': readQuote,
 		'`': readQuasi,
 		',': readComma,
+		'&': readAmpersand,
 		'(': readList,
 	}
 }

@@ -1,5 +1,3 @@
-(define list (func x x))
-
 (define t 't)
 
 (define nilp
@@ -144,7 +142,7 @@
      ((consp x)
       (cons (car x) (maketruelist (cdr x))))
      (t
-      (list x)))))
+      &(x)))))
 
 (define lookup
   (func (key x)
