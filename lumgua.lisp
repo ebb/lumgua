@@ -125,15 +125,6 @@
      ((= n 0) (car x))
      (t (nth (- n 1) (cdr x))))))
 
-(define dottedp
-  (func (x)
-    (cond
-     ((nilp x)
-      nil)
-     ((consp x)
-      (dottedp (cdr x)))
-     (t t))))
-
 (define maketruelist
   (func (x)
     (cond
@@ -222,14 +213,14 @@
 		      (match (funcopen f)
 			((func temp env)
 			 (match (templateopen temp)
-			   ((template name nvars dottedp freerefs code)
+			   ((template name nvars freerefs code)
 			    (let ((s (cellnew "(")))
 			      (cond
 			       ((= name "")
 				(strextend s "<anon>"))
 			       (t (strextend s name)))
 			      (for (cellget fp)
-				   (+ (cellget fp) (+ nvars (if dottedp 1 0)))
+				   (+ (cellget fp) nvars)
 				   (func (i)
 				     (strextend s " ")
 				     (strextend s (write (arrayget stack i)))))
@@ -298,7 +289,7 @@
 (define showtemplate
   (func (template nesting)
     (match (templateopen template)
-      ((template name nvars dottedp freerefs code)
+      ((template name nvars freerefs code)
        (cond
 	((consp nesting)
 	 (match (nth (car nesting) code)
@@ -307,7 +298,6 @@
 	(t
 	 (log (strcat &("name: " name)))
 	 (log (strcat &("nvars: " (write nvars))))
-	 (log (strcat &("dottedp: " (write dottedp))))
 	 (log (strcat &("freerefs: " (write freerefs))))
 	 (foldl (func (pc instr)
 		  (showinstr pc instr)

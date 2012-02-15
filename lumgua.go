@@ -54,7 +54,6 @@ type Nil struct{}
 type Template struct {
 	name     string
 	nvars    int
-	dottedp  bool
 	freeRefs []FreeRef
 	code     []Instr
 }
@@ -330,9 +329,6 @@ func newShiftInstr() Instr {
 
 func (*shiftInstr) Exec(m *Machine) {
 	nremove := m.f.temp.nvars
-	if m.f.temp.dottedp {
-		nremove++
-	}
 	nkeep := m.stack.Len() - nremove - m.fp
 	for i, j := m.fp, 0; j < nkeep; j++ {
 		m.stack.Set(i, m.stack.At(i+nremove))
@@ -354,7 +350,7 @@ func newApplyInstr(arg interface{}) Instr {
 	return &applyInstr{nargs}
 }
 
-func (m *Machine) prepareApplyArgs(nvars int, dottedp bool) {
+func (m *Machine) prepareApplyArgs(nvars int) {
 	rest := m.stack.Pop().(Value)
 	for i := 0; i < nvars; i++ {
 		switch x := rest.(type) {
@@ -369,31 +365,21 @@ func (m *Machine) prepareApplyArgs(nvars int, dottedp bool) {
 			return
 		}
 	}
-	if dottedp {
-		m.stack.Push(rest)
-	} else if !nilp(rest) {
+	if !nilp(rest) {
 		m.throw("too many arguments")
 	}
 }
 
-func (m *Machine) prepareArgs(nargs, nvars int, dottedp bool) {
+func (m *Machine) prepareArgs(nargs, nvars int) {
 	if nargs == -1 {
-		m.prepareApplyArgs(nvars, dottedp)
+		m.prepareApplyArgs(nvars)
 		return
 	}
 	if nargs < nvars {
 		m.throw("too few arguments")
 	}
-	if nargs > nvars && !dottedp {
+	if nargs > nvars {
 		m.throw("too many arguments")
-	}
-	if dottedp {
-		rest := Value(Nil{})
-		for i := nargs; i > nvars; i-- {
-			arg := m.stack.Pop().(Value)
-			rest = &Cons{arg, rest}
-		}
-		m.stack.Push(rest)
 	}
 }
 
@@ -408,7 +394,7 @@ func (m *Machine) applyFunc(f *Func, nargs int) {
 	m.pc = 0
 	m.code = temp.code
 	m.env = f.env
-	m.prepareArgs(nargs, temp.nvars, temp.dottedp)
+	m.prepareArgs(nargs, temp.nvars)
 }
 
 func (m *Machine) applyCont(c *Cont) {
@@ -605,11 +591,7 @@ var sharedPrimStack []Value
 
 func (instr *primInstr) Exec(m *Machine) {
 	nvars := m.f.temp.nvars
-	dottedp := m.f.temp.dottedp
 	n := nvars
-	if dottedp {
-		n++
-	}
 	if n > cap(sharedPrimStack) {
 		m.throw("too many arguments to prim")
 		return
@@ -663,7 +645,7 @@ func freshStack() Stack {
 	s.Push(
 		&Func{
 			&Template{
-				"halt", 0, false, nil,
+				"halt", 0, nil,
 				[]Instr{
 					&constInstr{intern("normal")},
 					&haltInstr{},
@@ -881,19 +863,17 @@ func primTemplateNew(args ...Value) (Value, os.Error) {
 	} else {
 		return nil, os.NewError("templatenew: type error")
 	}
-	dottedp := !nilp(args[1])
-	freeRefs, err := packFreeRefs(args[2])
+	freeRefs, err := packFreeRefs(args[1])
 	if err != nil {
 		return nil, os.NewError("templatenew: invalid free references")
 	}
-	code, err := packCode(args[3])
+	code, err := packCode(args[2])
 	if err != nil {
 		return nil, os.NewError("templatenew: invalid code")
 	}
 	temp := &Template{
 		"",
 		nvars,
-		dottedp,
 		freeRefs,
 		code,
 	}
@@ -933,7 +913,6 @@ func primTemplateOpen(args ...Value) (Value, os.Error) {
 		intern("template"),
 		String(temp.name),
 		Number(temp.nvars),
-		truth(temp.dottedp),
 		freeRefs,
 		code,
 	)
@@ -1496,7 +1475,7 @@ var primDecls = [][]interface{}{
 	{"cons a d", primCons},
 	{"car c", primCar},
 	{"cdr c", primCdr},
-	{"templatenew nvars dottedp freerefs code", primTemplateNew},
+	{"templatenew nvars freerefs code", primTemplateNew},
 	{"templateopen temp", primTemplateOpen},
 	{"funcnew temp env", primFuncNew},
 	{"funcopen f", primFuncOpen},
@@ -1546,16 +1525,9 @@ func makePrim(decl []interface{}) *Template {
 	parts := strings.Split(protocol, " ")
 	name := parts[0]
 	nargs := len(parts) - 1
-	dottedp := false
-	if len(parts) >= 3 {
-		if parts[len(parts)-2] == "." {
-			dottedp = true
-			nargs -= 2
-		}
-	}
 	prim := decl[1].(func(...Value) (Value, os.Error))
 	return &Template{
-		name, nargs, dottedp, nil,
+		name, nargs, nil,
 		[]Instr{
 			&primInstr{name, prim},
 			&returnInstr{},
@@ -1570,7 +1542,7 @@ func loadPrims() {
 	}
 	define("apply", &Func{
 		&Template{
-			"apply", 2, false, nil,
+			"apply", 2, nil,
 			[]Instr{
 				&localInstr{1},
 				&pushInstr{},
@@ -1583,7 +1555,7 @@ func loadPrims() {
 	})
 	define("call/cc", &Func{
 		&Template{
-			"call/cc", 1, false, nil,
+			"call/cc", 1, nil,
 			[]Instr{
 				&continuationInstr{},
 				&pushInstr{},
@@ -1656,12 +1628,12 @@ loop:
 
 func readQuote(buf io.ByteScanner) Literal {
 	x := read(buf)
-	return newListLiteral(false, intern("quote"), x)
+	return newListLiteral(intern("quote"), x)
 }
 
 func readQuasi(buf io.ByteScanner) Literal {
 	x := read(buf)
-	return newListLiteral(false, intern("quasiquote"), x)
+	return newListLiteral(intern("quasiquote"), x)
 }
 
 func readComma(buf io.ByteScanner) Literal {
@@ -1676,7 +1648,7 @@ func readComma(buf io.ByteScanner) Literal {
 		buf.UnreadByte()
 	}
 	x := read(buf)
-	return newListLiteral(false, tag, x)
+	return newListLiteral(tag, x)
 }
 
 func readAmpersand(buf io.ByteScanner) Literal {
@@ -1689,7 +1661,7 @@ func readAmpersand(buf io.ByteScanner) Literal {
 		panic("read: ill-formed ampersand")
 	}
 	x := readList(buf)
-	return newListLiteral(false, intern("ampersand"), x)
+	return newListLiteral(intern("ampersand"), x)
 }
 
 func readString(buf io.ByteScanner) Literal {
@@ -1730,7 +1702,6 @@ loop:
 
 func readList(buf io.ByteScanner) Literal {
 	skipws(buf)
-	dotted := false
 	items := []Literal{}
 	for {
 		b, err := buf.ReadByte()
@@ -1740,23 +1711,6 @@ func readList(buf io.ByteScanner) Literal {
 		if b == ')' {
 			break
 		}
-		if b == '.' {
-			if len(items) == 0 {
-				panic("read: ill-formed list")
-			}
-			dotted = true
-			skipws(buf)
-			items = append(items, read(buf))
-			skipws(buf)
-			b, err = buf.ReadByte()
-			if err != nil {
-				panic("read: premature end of file")
-			}
-			if b != ')' {
-				panic("read: ill-formed list")
-			}
-			break
-		}
 		buf.UnreadByte()
 		items = append(items, read(buf))
 		skipws(buf)
@@ -1764,7 +1718,7 @@ func readList(buf io.ByteScanner) Literal {
 	if len(items) == 0 {
 		return Nil{}
 	}
-	return newListLiteral(dotted, items...)
+	return newListLiteral(items...)
 }
 
 func read(buf io.ByteScanner) Literal {
@@ -1801,13 +1755,7 @@ func newReadAll(r io.Reader) []Literal {
 func valueOfLiteral(lit Literal) Value {
 	if x, ok := lit.(*ListLiteral); ok {
 		z := Value(Nil{})
-		i := len(x.items)
-		if x.dotted {
-			i--
-			z = valueOfLiteral(x.items[i])
-		}
-		for i > 0 {
-			i--
+		for i := len(x.items) - 1; i >= 0; i-- {
 			z = &Cons{valueOfLiteral(x.items[i]), z}
 		}
 		return z
@@ -1838,11 +1786,11 @@ func literalOfValue(val Value) Literal {
 		}
 		if !consp(cons.cdr) {
 			items = append(items, literalOfValue(cons.cdr))
-			return &ListLiteral{true, items}
+			return &ListLiteral{items}
 		}
 		cons, _ = cons.cdr.(*Cons)
 	}
-	return &ListLiteral{false, items}
+	return &ListLiteral{items}
 }
 
 type Literal interface {
@@ -1852,12 +1800,11 @@ type Literal interface {
 // Invariants:
 //   len(items) > 0
 type ListLiteral struct {
-	dotted bool
 	items  []Literal
 }
 
-func newListLiteral(dotted bool, items ...Literal) *ListLiteral {
-	return &ListLiteral{dotted, items}
+func newListLiteral(items ...Literal) *ListLiteral {
+	return &ListLiteral{items}
 }
 
 func (_ Nil) literalVariant()          {}
@@ -1867,9 +1814,6 @@ func (_ *Symbol) literalVariant()      {}
 func (_ *ListLiteral) literalVariant() {}
 
 func parseCallExpr(form *ListLiteral) Expr {
-	if form.dotted {
-		panic("parseExpr: ill-formed call")
-	}
 	forms := form.items
 	if len(forms) < 1 {
 		panic("parseExpr: empty call")
@@ -1879,12 +1823,10 @@ func parseCallExpr(form *ListLiteral) Expr {
 	return CallExpr{funcExpr, argExprs}
 }
 
-func parseParams(lit Literal) ([]*Symbol, bool) {
+func parseParams(lit Literal) []*Symbol {
 	switch x := lit.(type) {
 	case Nil:
-		return []*Symbol{}, false
-	case *Symbol:
-		return []*Symbol{x}, true
+		return []*Symbol{}
 	case *ListLiteral:
 		params := make([]*Symbol, len(x.items))
 		for i, item := range x.items {
@@ -1894,21 +1836,21 @@ func parseParams(lit Literal) ([]*Symbol, bool) {
 				panic("parseExpr: bad parameter")
 			}
 		}
-		return params, x.dotted
+		return params
 	}
 	panic("parseExpr: ill-formed parameter list")
-	return []*Symbol{}, false
+	return []*Symbol{}
 }
 
 func parseInits(lit Literal) []InitPair {
 	list, ok := lit.(*ListLiteral)
-	if !ok || list.dotted || len(list.items) == 0 {
+	if !ok || len(list.items) == 0 {
 		panic("parseExpr: ill-formed init list")
 	}
 	inits := make([]InitPair, len(list.items))
 	for i, item := range list.items {
 		pair, ok := item.(*ListLiteral)
-		if !ok || pair.dotted || len(pair.items) != 2 {
+		if !ok || len(pair.items) != 2 {
 			panic("parseExpr: ill-formed init list")
 		}
 		inits[i].name, ok = pair.items[0].(*Symbol)
@@ -1930,7 +1872,7 @@ func parseEach(forms []Literal) []Expr {
 
 func parseCondClause(form Literal) CondClause {
 	list, ok := form.(*ListLiteral)
-	if !ok || list.dotted || len(list.items) < 2 {
+	if !ok || len(list.items) < 2 {
 		panic("parseExpr: ill-formed cond clause")
 	}
 	return CondClause{
@@ -1945,7 +1887,7 @@ func analyzeUnquotesplicing(lit Literal) (Literal, bool) {
 	if !ok {
 		goto nomatch
 	}
-	if x.dotted || len(x.items) != 2 {
+	if len(x.items) != 2 {
 		goto nomatch
 	}
 	head, ok = x.items[0].(*Symbol)
@@ -1968,7 +1910,7 @@ func expandQuasi(lit Literal) Literal {
 	case String:
 		return x
 	case *Symbol:
-		return newListLiteral(false, intern("quote"), x)
+		return newListLiteral(intern("quote"), x)
 	}
 	x, ok := lit.(*ListLiteral)
 	if !ok {
@@ -1976,13 +1918,13 @@ func expandQuasi(lit Literal) Literal {
 	}
 	if head, ok := x.items[0].(*Symbol); ok {
 		if head == intern("unquote") {
-			if len(x.items) != 2 || x.dotted {
+			if len(x.items) != 2 {
 				panic("expandQuasi: ill-formed unquote")
 			}
 			return x.items[1]
 		}
 		if head == intern("quasiquote") {
-			if len(x.items) != 2 || x.dotted {
+			if len(x.items) != 2 {
 				panic("expandQuasi: ill-formed quasiquote")
 			}
 			return expandQuasi(expandQuasi(x.items[1]))
@@ -1994,7 +1936,6 @@ func expandQuasi(lit Literal) Literal {
 		acc = subLit
 	} else {
 		acc = newListLiteral(
-			false,
 			intern("cons"),
 			expandQuasi(item),
 			Nil{},
@@ -2005,7 +1946,6 @@ func expandQuasi(lit Literal) Literal {
 		subLit, ok := analyzeUnquotesplicing(item)
 		if ok {
 			acc = newListLiteral(
-				false,
 				intern("append"),
 				subLit,
 				acc,
@@ -2013,7 +1953,6 @@ func expandQuasi(lit Literal) Literal {
 			continue
 		}
 		acc = newListLiteral(
-			false,
 			intern("cons"),
 			expandQuasi(item),
 			acc,
@@ -2025,7 +1964,7 @@ func expandQuasi(lit Literal) Literal {
 func parseMatchClause(lit Literal) MatchClause {
 	var clause MatchClause
 	x, ok := lit.(*ListLiteral)
-	if !ok || x.dotted || len(x.items) < 2 {
+	if !ok || len(x.items) < 2 {
 		panic("parseExpr: ill-formed match clause")
 	}
 	sym, ok := x.items[0].(*Symbol)
@@ -2033,7 +1972,6 @@ func parseMatchClause(lit Literal) MatchClause {
 		// TODO - this is awkward
 		clause.tag = sym
 		clause.params = []*Symbol{}
-		clause.dotted = false
 		clause.body = parseEach(x.items[1:])
 		return clause
 	}
@@ -2045,7 +1983,6 @@ func parseMatchClause(lit Literal) MatchClause {
 	if !ok {
 		panic("parseExpr: ill-formed match clause")
 	}
-	clause.dotted = pattern.dotted
 	clause.params = make([]*Symbol, len(pattern.items[1:]))
 	for i, item := range pattern.items[1:] {
 		sym, ok := item.(*Symbol)
@@ -2069,9 +2006,6 @@ func parseExpr(lit Literal) Expr {
 	case *Symbol:
 		return RefExpr{x}
 	case *ListLiteral:
-		if x.dotted {
-			panic("parseExpr: dotted list fail")
-		}
 		if len(x.items) == 0 {
 			panic("parseExpr: empty expression")
 		}
@@ -2130,9 +2064,9 @@ func parseExpr(lit Literal) Expr {
 			if len(x.items) < 3 {
 				panic("parseExpr: ill-formed func")
 			}
-			params, dotted := parseParams(x.items[1])
+			params := parseParams(x.items[1])
 			body := parseEach(x.items[2:])
-			return FuncExpr{params, dotted, body}
+			return FuncExpr{params, body}
 		}
 		if head == intern("let") {
 			if len(x.items) < 3 {
@@ -2216,7 +2150,6 @@ type JmpExpr struct {
 
 type FuncExpr struct {
 	params []*Symbol
-	dotted bool
 	body   []Expr
 }
 
@@ -2260,7 +2193,6 @@ type OrExpr struct {
 type MatchClause struct {
 	tag *Symbol
 	params []*Symbol
-	dotted bool
 	body []Expr
 }
 
@@ -2331,7 +2263,7 @@ func (expr LetExpr) expand() Expr {
 		argExprs[i] = init.expr
 	}
 	return CallExpr{
-		FuncExpr{params, false, expr.body},
+		FuncExpr{params, expr.body},
 		argExprs,
 	}
 }
@@ -2388,7 +2320,6 @@ func (expr MatchExpr) expand() Expr {
 	if clause.tag == intern("t") {
 		funcExpr := FuncExpr{
 			[]*Symbol{intern("tag"), intern("args")},
-			false,
 			[]Expr{CallExpr{RefExpr{intern("f")}, []Expr{}}},
 		}
 		acc = LetExpr{
@@ -2396,7 +2327,6 @@ func (expr MatchExpr) expand() Expr {
 				intern("f"),
 				FuncExpr{
 					[]*Symbol{},
-					false,
 					clause.body,
 				},
 			}},
@@ -2407,7 +2337,6 @@ func (expr MatchExpr) expand() Expr {
 	} else {
 		acc = FuncExpr{
 			[]*Symbol{intern("tag"), intern("args")},
-			false,
 			[]Expr{CallExpr{
 				RefExpr{intern("throw")},
 				[]Expr{QuoteExpr{String("match: no match")}},
@@ -2421,7 +2350,6 @@ func (expr MatchExpr) expand() Expr {
 	for i >= 0 {
 		funcExpr := FuncExpr{
 			[]*Symbol{intern("tag"), intern("args")},
-			false,
 			[]Expr{IfExpr{
 				CallExpr{
 					RefExpr{intern("=")},
@@ -2451,7 +2379,6 @@ func (expr MatchExpr) expand() Expr {
 				intern("f"),
 				FuncExpr{
 					expr.clauses[i].params,
-					expr.clauses[i].dotted,
 					expr.clauses[i].body,
 				},
 			}, {
@@ -2810,15 +2737,11 @@ func compExpr(expr Expr, env *CompEnv, argp bool, tailp int) []Asm {
 	case FuncExpr:
 		body := BeginExpr{expr.body}
 		nvars := len(expr.params)
-		if expr.dotted {
-			nvars--
-		}
 		funcEnv, freeRefs := analyzeRefs(env, expr.params, expr.body)
 		code := assemble(compExpr(body, funcEnv, false, TAIL))
 		temp := &Template{
 			name:     "",
 			nvars:    nvars,
-			dottedp:  expr.dotted,
 			freeRefs: freeRefs,
 			code:     code,
 		}
@@ -2880,7 +2803,6 @@ func compile(expr Expr) (temp *Template, err os.Error) {
 	temp = &Template{
 		name:     "",
 		nvars:    0,
-		dottedp:  false,
 		freeRefs: []FreeRef{},
 		code:     code,
 	}
@@ -2921,7 +2843,6 @@ func macroexpandall(expr Expr) Expr {
 		}
 		return FuncExpr{
 			core.params,
-			core.dotted,
 			body,
 		}
 	case CallExpr:
@@ -2954,7 +2875,7 @@ func topFunc(temps []*Template) *Func {
 	}
 	code[3*n] = &returnInstr{}
 	return &Func{
-		&Template{"", 0, false, nil, code},
+		&Template{"", 0, nil, code},
 		nil,
 	}
 }
