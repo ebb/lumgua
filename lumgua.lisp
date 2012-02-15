@@ -2,7 +2,7 @@
 
 (define nilp
   (func (x)
-    (= x nil)))
+    (= x '())))
 
 (define caar
   (func (x)
@@ -58,15 +58,15 @@
   (func (f x)
     (foldl (func (ignore elt)
 	     (f elt)
-	     nil)
-	   nil
+	     '())
+	   '()
 	   x)))
 
 (define map
   (func (f x)
     (foldr (func (elt z)
 	     (cons (f elt) z))
-	   nil
+	   '()
 	   x)))
 
 (define filter
@@ -76,7 +76,7 @@
 	       ((pred elt)
 		(cons elt z))
 	       (t z)))
-	   nil
+	   '()
 	   x)))
 
 (define compose
@@ -90,7 +90,7 @@
 
 (define reverse
   (func (x)
-    (foldl snoc nil x)))
+    (foldl snoc '() x)))
 
 (define append
   (func (x y)
@@ -128,7 +128,7 @@
 (define lookup
   (func (key x)
     (cond
-     ((nilp x) nil)
+     ((nilp x) '())
      ((= key (caar x)) (cadr (car x)))
      (t (jmp (lookup key (cdr x)))))))
 
@@ -184,7 +184,7 @@
 	    (loop (func ()
 		    (cond
 		     ((= (cellget fp) 0)
-		      (esc nil)))
+		      (esc '())))
 		    (let ((f (arrayget stack (- (cellget fp) 3))))
 		      (cellput fp (arrayget stack (- (cellget fp) 2)))
 		      (match (funcopen f)
@@ -238,7 +238,7 @@
 (define detect
   (func (pred x)
     (cond
-     ((nilp x) nil)
+     ((nilp x) '())
      ((pred (car x)) t)
      (t (detect pred (cdr x))))))
 
@@ -281,6 +281,6 @@
 		  (+ pc 1))
 		0
 		code)
-	 nil))))))
+	 '()))))))
 
 (repl)

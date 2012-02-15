@@ -1648,9 +1648,6 @@ loop:
 		panic("read: empty atom")
 	}
 	atom := string(atomBuf)
-	if atom == "nil" {
-		return newListLiteral()
-	}
 	n, err := strconv.Atof64(atom)
 	if err == nil {
 		return Number(n)
@@ -2027,7 +2024,7 @@ func parseExpr(lit Literal) Expr {
 		panic("parseExpr: nonliteral")
 	}
 	if x.empty() {
-		return QuoteExpr{emptyList}
+		panic("parseExpr: empty expression")
 	}
 	head, ok := x.head().(*Symbol)
 	if !ok {
