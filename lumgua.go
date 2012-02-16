@@ -2092,14 +2092,27 @@ func parseExpr(lit Literal) Expr {
 		return LetExpr{inits, body}
 	}
 	if head == intern("define") {
-		if x.len() != 3 {
+		if x.len() < 3 {
 			panic("parseExpr: ill-formed define")
 		}
-		sym, ok := x.at(1).(*Symbol)
-		if !ok {
-			panic("parseExpr: ill-formed define")
+		switch pattern := x.at(1).(type) {
+		case *Symbol:
+			return DefineExpr{pattern, parseExpr(x.at(2))}
+		case *ListLiteral:
+			if pattern.empty() {
+				panic("parseExpr: ill-formed define")
+			}
+			name, ok := pattern.head().(*Symbol)
+			if !ok {
+				panic("parseExpr: ill-formed define")
+			}
+			funcExpr := FuncExpr{
+				parseParams(pattern.tail()),
+				parseEach(x.items[2:]),
+			}
+			return DefineExpr{name, funcExpr}
 		}
-		return DefineExpr{sym, parseExpr(x.at(2))}
+		panic("parseExpr: ill-formed define")
 	}
 	if head == intern("cond") {
 		if x.len() < 2 {
