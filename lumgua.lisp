@@ -1,5 +1,3 @@
-(define t 't)
-
 (define (nilp x)
   (= x '()))
 
@@ -208,9 +206,9 @@
 
 (define (detect pred x)
   (cond
-   ((nilp x) '())
-   ((pred (car x)) t)
-   (else (detect pred (cdr x)))))
+   ((nilp x) F)
+   ((pred (car x)) T)
+   (else (jmp (detect pred (cdr x))))))
 
 (define (member x s)
   (detect (func (y) (= x y)) s))
