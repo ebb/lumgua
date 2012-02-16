@@ -48,6 +48,8 @@ type Number float64
 
 type String string
 
+type Bool bool
+
 type List struct {
 	head Value
 	tail *List
@@ -135,6 +137,11 @@ func nilp(x Value) (ok bool) {
 
 func stringp(x Value) (ok bool) {
 	_, ok = x.(String)
+	return
+}
+
+func boolp(x Value) (ok bool) {
+	_, ok = x.(Bool)
 	return
 }
 
@@ -576,7 +583,7 @@ func newFjumpInstr(arg Value) Instr {
 }
 
 func (instr *fjumpInstr) Exec(m *Machine) {
-	if nilp(m.a) {
+	if b, ok := m.a.(Bool); ok && !bool(b) {
 		m.pc = instr.pc
 	}
 }
@@ -712,10 +719,7 @@ func (m *Machine) run() {
 type Prim func(...Value) (Value, os.Error)
 
 func truth(x bool) Value {
-	if x {
-		return intern("t")
-	}
-	return emptyList
+	return Bool(x)
 }
 
 func primSymbolp(args ...Value) (Value, os.Error) {
@@ -728,6 +732,10 @@ func primNumberp(args ...Value) (Value, os.Error) {
 
 func primStringp(args ...Value) (Value, os.Error) {
 	return truth(stringp(args[0])), nil
+}
+
+func primBoolp(args ...Value) (Value, os.Error) {
+	return truth(boolp(args[0])), nil
 }
 
 func primConsp(args ...Value) (Value, os.Error) {
@@ -1497,6 +1505,7 @@ var primDecls = [][]interface{}{
 	{"symbolp x", primSymbolp},
 	{"numberp x", primNumberp},
 	{"stringp x", primStringp},
+	{"boolp x", primBoolp},
 	{"consp x", primConsp},
 	{"templatep x", primTemplatep},
 	{"funcp x", primFuncp},
@@ -1598,6 +1607,8 @@ func loadPrims() {
 		),
 		nil,
 	))
+	define("T", Bool(true))
+	define("F", Bool(false))
 }
 
 /// reader
@@ -1828,6 +1839,10 @@ func (s *Symbol) literal() (Literal, os.Error) {
 	return s, nil
 }
 
+func (b Bool) literal() (Literal, os.Error) {
+	return nil, os.NewError("not a literal")
+}
+
 func (list *List) literal() (Literal, os.Error) {
 	items := make([]Literal, list.len())
 	rest := list
@@ -1922,7 +1937,10 @@ func parseCondClause(form Literal) CondClause {
 	}
 	head := list.head()
 	if head == intern("else") {
-		head = newListLiteral(intern("quote"), intern("t"))
+		return CondClause{
+			QuoteExpr{Bool(true)},
+			parseEach(list.items[1:]),
+		}
 	}
 	return CondClause{
 		parseExpr(head),
@@ -2321,7 +2339,7 @@ func (expr CondExpr) expand() Expr {
 }
 
 func (expr AndExpr) expand() Expr {
-	acc := Expr(RefExpr{intern("t")})
+	acc := Expr(QuoteExpr{Bool(true)})
 	for i := len(expr.exprs) - 1; i >= 0; i-- {
 		acc = IfExpr{
 			expr.exprs[i],
@@ -2337,7 +2355,7 @@ func (expr OrExpr) expand() Expr {
 	for i := len(expr.exprs) - 1; i >= 0; i-- {
 		acc = IfExpr{
 			expr.exprs[i],
-			RefExpr{intern("t")},
+			QuoteExpr{Bool(true)},
 			acc,
 		}
 	}

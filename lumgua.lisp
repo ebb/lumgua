@@ -85,7 +85,7 @@
   (nilp x))
 
 (define (atomp x)
-  (or (nilp x) (numberp x) (symbolp x) (stringp x)))
+  (or (nilp x) (numberp x) (symbolp x) (stringp x) (boolp x)))
 
 (define first car)
 
@@ -136,12 +136,13 @@
   (cond
    ((numberp x) (itoa x))
    ((symbolp x) (symbolname x))
-   ((nilp x) "nil")
+   ((nilp x) "()")
    ((consp x) (writecons x))
    ((templatep x) "<template>")
    ((funcp x) "<func>")
    ((contp x) "<cont>")
    ((stringp x) (strcat &("\"" (escape x) "\"")))
+   ((boolp x) (if x "<true>" "<false>"))
    ((cellp x) "<cell>")
    ((arrayp x) "<array>")
    (else (throw "write: unknown type"))))
@@ -196,7 +197,7 @@
 					     (cc s))))))
 		  "entering REPL")))
   (loop (func ()
-	  (let ((text (http 'get "http://localhost:8082/eval" &())))
+	  (let ((text (http 'get "http://localhost:8082/eval" '())))
 	    (let ((exps (readall text)))
 	      (foreach (func (exp)
 			 (log (write ((funcnew (compile exp)
@@ -243,6 +244,6 @@
 		(+ pc 1))
 	      0
 	      code)
-       '())))))
+       'end)))))
 
 (repl)
