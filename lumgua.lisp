@@ -102,12 +102,6 @@
    ((= n 0) (car x))
    (else (nth (- n 1) (cdr x)))))
 
-(define (lookup key x)
-  (cond
-   ((nilp x) '())
-   ((= key (caar x)) (cadr (car x)))
-   (else (jmp (lookup key (cdr x))))))
-
 (define (strextend cell str)
   (cellput cell (strcat &((cellget cell) str))))
 
@@ -147,34 +141,36 @@
    ((arrayp x) "<array>")
    (else (throw "write: unknown type"))))
 
+(define (showoneframe stack fp)
+  (let ((f (arrayget stack (- fp 3))))
+    (match (funcopen f)
+      ((func temp env)
+       (match (templateopen temp)
+	 ((template name nvars freerefs code)
+	  (let ((s (cellnew "(")))
+	    (cond
+	     ((= name "")
+	      (strextend s "<anon>"))
+	     (else (strextend s name)))
+	    (for fp
+		 (+ fp nvars)
+		 (func (i)
+		   (strextend s " ")
+		   (strextend s (write (arrayget stack i)))))
+	    (strextend s ")")
+	    (log (cellget s)))))))))
+
+(define (showbacktraceloop stack fp)
+  (cond
+   ((!= fp 0)
+    (showoneframe stack fp)
+    (let ((nextfp (arrayget stack (- fp 2))))
+      (jmp (showbacktraceloop stack nextfp))))))
+
 (define (showbacktrace c)
   (match (contopen c)
     ((cont stack)
-     (call/cc
-      (func (esc)
-	(let ((fp (cellnew (arraylength stack))))
-	  (loop (func ()
-		  (cond
-		   ((= (cellget fp) 0)
-		    (esc '())))
-		  (let ((f (arrayget stack (- (cellget fp) 3))))
-		    (cellput fp (arrayget stack (- (cellget fp) 2)))
-		    (match (funcopen f)
-		      ((func temp env)
-		       (match (templateopen temp)
-			 ((template name nvars freerefs code)
-			  (let ((s (cellnew "(")))
-			    (cond
-			     ((= name "")
-			      (strextend s "<anon>"))
-			     (else (strextend s name)))
-			    (for (cellget fp)
-				 (+ (cellget fp) nvars)
-				 (func (i)
-				   (strextend s " ")
-				   (strextend s (write (arrayget stack i)))))
-			    (strextend s ")")
-			    (log (cellget s))))))))))))))))
+     (showbacktraceloop stack (arraylength stack)))))
 
 (define (time f)
   (- 0 (- (now)
