@@ -141,31 +141,31 @@
    ((arrayp x) "<array>")
    (else (throw "write: unknown type"))))
 
-(define (showoneframe stack fp)
-  (let ((f (arrayget stack (- fp 3))))
-    (match (funcopen f)
-      ((func temp env)
-       (match (templateopen temp)
-	 ((template name nvars freerefs code)
-	  (let ((s (cellnew "(")))
-	    (cond
-	     ((= name "")
-	      (strextend s "<anon>"))
-	     (else (strextend s name)))
-	    (for fp
-		 (+ fp nvars)
-		 (func (i)
-		   (strextend s " ")
-		   (strextend s (write (arrayget stack i)))))
-	    (strextend s ")")
-	    (log (cellget s)))))))))
+(define (showoneframe stack f fp)
+  (match (funcopen f)
+    ((func temp env)
+     (match (templateopen temp)
+       ((template name nvars freerefs code)
+	(let ((s (cellnew "(")))
+	  (cond
+	   ((= name "")
+	    (strextend s "<anon>"))
+	   (else (strextend s name)))
+	  (for fp
+	       (+ fp nvars)
+	       (func (i)
+		 (strextend s " ")
+		 (strextend s (write (arrayget stack i)))))
+	  (strextend s ")")
+	  (log (cellget s))))))))
 
 (define (showbacktraceloop stack fp)
   (cond
    ((!= fp 0)
-    (showoneframe stack fp)
-    (let ((nextfp (arrayget stack (- fp 2))))
-      (jmp (showbacktraceloop stack nextfp))))))
+    (let ((f (arrayget stack (- fp 3)))
+	  (fp (arrayget stack (- fp 2))))
+      (showoneframe stack f fp)
+      (jmp (showbacktraceloop stack fp))))))
 
 (define (showbacktrace c)
   (match (contopen c)
@@ -176,22 +176,28 @@
   (- 0 (- (now)
 	  (begin (f) (now)))))
 
+(define (hardpanic s)
+  (log s)
+  (exit 1))
+
 (define throwfunc
-  (cellnew (func (s)
-	     (log s)
-	     (exit 1))))
+  (cellnew hardpanic))
 
 (define (throw s)
   ((cellget throwfunc) s))
 
 (define (repl)
-  (log (call/cc (func (cc)
-		  (cellput throwfunc
-			   (func (s)
-			     (jmp (call/cc (func (xx)
-					     (showbacktrace xx)
-					     (cc s))))))
-		  "entering REPL")))
+  (log (call/cc
+	(func (cc)
+	  (cellput throwfunc
+		   (func (s)
+		     (call/cc (func (xx)
+				(let ((softpanic (cellget throwfunc)))
+				  (cellput throwfunc hardpanic)
+				  (showbacktrace xx)
+				  (cellput throwfunc softpanic))
+				(cc s)))))
+	  "entering REPL")))
   (loop (func ()
 	  (let ((text (http 'get "http://localhost:8082/eval" '())))
 	    (let ((exps (readall text)))
