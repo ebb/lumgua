@@ -61,7 +61,7 @@
 	   (cond
 	    ((pred elt)
 	     (cons elt z))
-	    (t z)))
+	    (else z)))
 	 '()
 	 x))
 
@@ -79,7 +79,7 @@
   (cond
    ((nilp y) x)
    ((nilp x) y)
-   (t (foldr cons y x))))
+   (else (foldr cons y x))))
 
 (define (not x)
   (nilp x))
@@ -100,13 +100,13 @@
 (define (nth n x)
   (cond
    ((= n 0) (car x))
-   (t (nth (- n 1) (cdr x)))))
+   (else (nth (- n 1) (cdr x)))))
 
 (define (lookup key x)
   (cond
    ((nilp x) '())
    ((= key (caar x)) (cadr (car x)))
-   (t (jmp (lookup key (cdr x))))))
+   (else (jmp (lookup key (cdr x))))))
 
 (define (strextend cell str)
   (cellput cell (strcat &((cellget cell) str))))
@@ -122,7 +122,7 @@
 			    ((= c "\"") "\\\"")
 			    ((= c "\n") "\\n")
 			    ((= c "\t") "\\t")
-			    (t c))))))
+			    (else c))))))
     (cellget se)))
 
 (define (writecons x)
@@ -144,7 +144,7 @@
    ((stringp x) (strcat &("\"" (escape x) "\"")))
    ((cellp x) "<cell>")
    ((arrayp x) "<array>")
-   (t (throw "write: unknown type"))))
+   (else (throw "write: unknown type"))))
 
 (define (showbacktrace c)
   (match (contopen c)
@@ -166,7 +166,7 @@
 			    (cond
 			     ((= name "")
 			      (strextend s "<anon>"))
-			     (t (strextend s name)))
+			     (else (strextend s name)))
 			    (for (cellget fp)
 				 (+ (cellget fp) nvars)
 				 (func (i)
@@ -207,7 +207,7 @@
   (cond
    ((nilp x) '())
    ((pred (car x)) t)
-   (t (detect pred (cdr x)))))
+   (else (detect pred (cdr x)))))
 
 (define (member x s)
   (detect (func (y) (= x y)) s))
@@ -234,7 +234,7 @@
        (match (nth (car nesting) code)
 	 ((close template)
 	  (showtemplate template (cdr nesting)))))
-      (t
+      (else
        (log (strcat &("name: " name)))
        (log (strcat &("nvars: " (write nvars))))
        (log (strcat &("freerefs: " (write freerefs))))

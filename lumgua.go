@@ -1920,8 +1920,12 @@ func parseCondClause(form Literal) CondClause {
 	if !ok || list.len() < 2 {
 		panic("parseExpr: ill-formed cond clause")
 	}
+	head := list.head()
+	if head == intern("else") {
+		head = newListLiteral(intern("quote"), intern("t"))
+	}
 	return CondClause{
-		parseExpr(list.head()),
+		parseExpr(head),
 		parseEach(list.items[1:]),
 	}
 }
@@ -1951,13 +1955,13 @@ func expandQuasi(lit Literal) Literal {
 		return lit
 	}
 	head := x.head()
-	if head == Literal(intern("unquote")) {
+	if head == intern("unquote") {
 		if x.len() != 2 {
 			panic("expandQuasi: ill-formed unquote")
 		}
 		return x.at(1)
 	}
-	if head == Literal(intern("quasiquote")) {
+	if head == intern("quasiquote") {
 		if x.len() != 2 {
 			panic("expandQuasi: ill-formed quasiquote")
 		}
@@ -1984,7 +1988,7 @@ func parseMatchClause(lit Literal) MatchClause {
 		panic("parseExpr: ill-formed match clause")
 	}
 	sym, ok := x.head().(*Symbol)
-	if ok && sym == intern("t") {
+	if ok && sym == intern("else") {
 		// TODO - this is awkward
 		clause.tag = sym
 		clause.params = []*Symbol{}
@@ -2030,13 +2034,13 @@ func parseExpr(lit Literal) Expr {
 	if !ok {
 		return parseCallExpr(x)
 	}
-	if head == Literal(intern("quasiquote")) {
+	if head == intern("quasiquote") {
 		if x.len() != 2 {
 			panic("parseExpr: ill-formed quasiquote")
 		}
 		return parseExpr(expandQuasi(x.at(1)))
 	}
-	if head == Literal(intern("ampersand")) {
+	if head == intern("ampersand") {
 		if x.len() != 2 {
 			panic("parseExpr: ill-formed ampersand")
 		}
@@ -2345,7 +2349,7 @@ func (expr MatchExpr) expand() Expr {
 	clause := expr.clauses[i]
 	var acc Expr
 	var defaultExpr Expr // XXX - code gets duplicated in the expansion
-	if clause.tag == intern("t") {
+	if clause.tag == intern("else") {
 		funcExpr := FuncExpr{
 			[]*Symbol{intern("tag"), intern("args")},
 			[]Expr{CallExpr{RefExpr{intern("f")}, []Expr{}}},
