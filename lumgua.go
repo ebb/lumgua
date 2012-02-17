@@ -1970,7 +1970,7 @@ func expandQuasi(lit Literal) Literal {
 	}
 	x := lit.(*ListLiteral)
 	if x.empty() {
-		return lit
+		return newListLiteral(intern("quote"), lit)
 	}
 	head := x.head()
 	if head == intern("unquote") {
