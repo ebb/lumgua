@@ -37,14 +37,12 @@ Scheme similarities:
 
   * S-expression syntax and data.
   * No type system.
-  * Same calling convention.
 
 ML similarities:
 
   * No macros.
   * No variable mutation.
-  * Early binding.
-  * Lists are immutable.
+  * Lists are immutable and never "dotted".
 
 Some important similarities shared with both Scheme and ML:
 
