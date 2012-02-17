@@ -80,7 +80,7 @@
    (else (foldr cons y x))))
 
 (define (not x)
-  (nilp x))
+  (if x F T))
 
 (define (atomp x)
   (or (nilp x) (numberp x) (symbolp x) (stringp x) (boolp x)))
@@ -96,9 +96,9 @@
   (third (cdr x)))
 
 (define (nth n x)
-  (cond
-   ((= n 0) (car x))
-   (else (nth (- n 1) (cdr x)))))
+  (jmp (cond
+	((= n 0) (car x))
+	(else (nth (- n 1) (cdr x))))))
 
 (define (strextend cell str)
   (cellput cell (strcat &((cellget cell) str))))
