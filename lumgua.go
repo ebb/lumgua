@@ -1471,7 +1471,10 @@ func primReadAll(args ...Value) (val Value, err os.Error) {
 		panic(x)
 	}()
 	buf := bytes.NewBufferString(string(args[0].(String)))
-	lits := readAll(buf)
+	lits, err := readAll(buf)
+	if err != nil {
+		return
+	}
 	acc := emptyList
 	for i := len(lits) - 1; i >= 0; i-- {
 		acc = &List{lits[i].value(), acc}
@@ -1774,9 +1777,19 @@ func read(buf io.ByteScanner) Literal {
 	return readAtom(buf)
 }
 
-func readAll(r io.Reader) []Literal {
+func readAll(r io.Reader) (lits []Literal, err os.Error) {
+	defer func() {
+		x := recover()
+		if s, ok := x.(string); ok {
+			err = os.NewError(s)
+			return
+		}
+		if x != nil {
+			panic(x)
+		}
+	}()
 	buf := bufio.NewReader(r)
-	items := []Literal{}
+	lits = []Literal{}
 	for {
 		skipws(buf)
 		if _, err := buf.ReadByte(); err != nil {
@@ -1784,9 +1797,9 @@ func readAll(r io.Reader) []Literal {
 		}
 		_ = buf.UnreadByte()
 		item := read(buf)
-		items = append(items, item)
+		lits = append(lits, item)
 	}
-	return items
+	return lits, nil
 }
 
 type Literal interface {
@@ -2166,6 +2179,20 @@ func parseExpr(lit Literal) Expr {
 		}
 	}
 	return parseCallExpr(x)
+}
+
+func parse(lit Literal) (_ Expr, err os.Error) {
+	defer func() {
+		x := recover()
+		if s, ok := x.(string); ok {
+			err = os.NewError(s)
+			return
+		}
+		if x != nil {
+			panic(x)
+		}
+	}()
+	return parseExpr(lit), nil
 }
 
 type Expr interface {
@@ -2928,20 +2955,17 @@ func fetchSourceModule(name, address string) (mod *Module, err os.Error) {
 		return
 	}
 	defer response.Body.Close()
-	defer func() {
-		x := recover()
-		if s, ok := x.(string); ok {
-			err = os.NewError(s)
+	lits, err := readAll(response.Body)
+	if err != nil {
+		return
+	}
+	temps := make([]*Template, len(lits))
+	for i, lit := range lits {
+		expr, err := parse(lit)
+		if err != nil {
 			return
 		}
-		if x != nil {
-			panic(x)
-		}
-	}()
-	exprs := readAll(response.Body)
-	temps := make([]*Template, len(exprs))
-	for i, expr := range exprs {
-		temps[i], err = compile(parseExpr(expr))
+		temps[i], err = compile(expr)
 		if err != nil {
 			return
 		}
