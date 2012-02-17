@@ -1471,7 +1471,7 @@ func primReadAll(args ...Value) (val Value, err os.Error) {
 		panic(x)
 	}()
 	buf := bytes.NewBufferString(string(args[0].(String)))
-	lits := newReadAll(buf)
+	lits := readAll(buf)
 	acc := emptyList
 	for i := len(lits) - 1; i >= 0; i-- {
 		acc = &List{lits[i].value(), acc}
@@ -1774,7 +1774,7 @@ func read(buf io.ByteScanner) Literal {
 	return readAtom(buf)
 }
 
-func newReadAll(r io.Reader) []Literal {
+func readAll(r io.Reader) []Literal {
 	buf := bufio.NewReader(r)
 	items := []Literal{}
 	for {
@@ -2938,7 +2938,7 @@ func fetchSourceModule(name, address string) (mod *Module, err os.Error) {
 			panic(x)
 		}
 	}()
-	exprs := newReadAll(response.Body)
+	exprs := readAll(response.Body)
 	temps := make([]*Template, len(exprs))
 	for i, expr := range exprs {
 		temps[i], err = compile(parseExpr(expr))
