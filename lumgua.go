@@ -26,7 +26,7 @@ var address *string = flag.String("a", ":8082", "address")
 
 /// global state
 
-var globals map[string]*Binding
+var globals map[string]Value
 
 var symbolTable map[string]*Symbol
 
@@ -501,12 +501,6 @@ func (instr *constInstr) Sexp() Value {
 	return list(intern("const"), instr.val)
 }
 
-type Binding struct {
-	value Value
-}
-
-var unboundGlobalValue Value
-
 type globalInstr struct {
 	name string
 }
@@ -516,12 +510,12 @@ func newGlobalInstr(arg Value) Instr {
 }
 
 func (instr *globalInstr) Exec(m *Machine) {
-	binding, ok := globals[instr.name]
-	if !ok {
+	x, ok := globals[instr.name]
+	if !ok { // TODO this check should become redundant
 		m.throw("unbound global: " + instr.name)
 		return
 	}
-	m.a = binding.value
+	m.a = x
 }
 
 func (instr *globalInstr) Sexp() Value {
@@ -1280,36 +1274,13 @@ func primGe(args ...Value) (Value, os.Error) {
 	return truth(float64(a) >= float64(b)), nil
 }
 
-func primDef(args ...Value) (Value, os.Error) {
-	sym, ok := args[0].(*Symbol)
-	if !ok {
-		return nil, os.NewError("def: type error")
-	}
-	name := sym.name
-	_, ok = globals[name]
-	if ok {
-		return nil, os.NewError(
-			"def: multiple definitions for " +
-				name,
-		)
-	}
-	globals[name] = &Binding{args[1]}
-	switch f := args[1].(type) {
-	case *Func:
-		f.temp.name = name
-	}
-	return args[0], nil
-}
-
 func primGlobal(args ...Value) (Value, os.Error) {
 	sym, ok := args[0].(*Symbol)
 	if !ok {
 		return nil, os.NewError("global: type error")
 	}
-	if binding, ok := globals[sym.name]; ok {
-		if binding.value != unboundGlobalValue {
-			return binding.value, nil
-		}
+	if x, ok := globals[sym.name]; ok {
+		return x, nil
 	}
 	return nil, os.NewError("global: unbound")
 }
@@ -1549,7 +1520,6 @@ var primDecls = [][]interface{}{
 	{"> a b", primGt},
 	{"<= a b", primLe},
 	{">= a b", primGe},
-	{"def var val", primDef},
 	{"global name", primGlobal},
 	{"log text", primLog},
 	{"http method url args", primHttp},
@@ -1561,7 +1531,7 @@ var primDecls = [][]interface{}{
 }
 
 func define(name string, value Value) {
-	globals[name] = &Binding{value}
+	globals[name] = value
 }
 
 func makePrim(decl []interface{}) *Template {
@@ -2310,7 +2280,6 @@ type MacroExpr interface {
 
 func (_ AmpersandExpr) macroExprVariant() {}
 func (_ LetExpr) macroExprVariant() {}
-func (_ DefineExpr) macroExprVariant() {}
 func (_ CondExpr) macroExprVariant() {}
 func (_ AndExpr) macroExprVariant() {}
 func (_ OrExpr) macroExprVariant() {}
@@ -2342,13 +2311,6 @@ func (expr LetExpr) expand() Expr {
 	return CallExpr{
 		FuncExpr{params, expr.body},
 		argExprs,
-	}
-}
-
-func (expr DefineExpr) expand() Expr {
-	return CallExpr{
-		RefExpr{intern("def")},
-		[]Expr{QuoteExpr{expr.name}, expr.expr},
 	}
 }
 
@@ -2684,6 +2646,10 @@ func (set1 *SymbolSet) union(set2 *SymbolSet) *SymbolSet {
 	return u
 }
 
+func (set *SymbolSet) remove(sym *Symbol) {
+	set.table[sym] = false, false
+}
+
 func (set1 *SymbolSet) minus(set2 *SymbolSet) *SymbolSet {
 	acc := newSymbolSet()
 	for sym, _ := range set1.table {
@@ -2765,6 +2731,14 @@ func newRefAsm(env *CompEnv, sym *Symbol) Asm {
 	return newGlobalAsm(sym.name)
 }
 
+func compFuncExpr(expr FuncExpr, env *CompEnv) *Template {
+	body := BeginExpr{expr.body}
+	nvars := len(expr.params)
+	funcEnv, freeRefs := analyzeRefs(env, expr.params, expr.body)
+	code := assemble(compExpr(body, funcEnv, false, TAIL))
+	return newTemplate("", nvars, freeRefs, code)
+}
+
 func compExpr(expr Expr, env *CompEnv, argp bool, tailp int) []Asm {
 	switch expr := expr.(type) {
 	case QuoteExpr:
@@ -2812,11 +2786,7 @@ func compExpr(expr Expr, env *CompEnv, argp bool, tailp int) []Asm {
 	case JmpExpr:
 		return compExpr(expr.expr, env, argp, JMP)
 	case FuncExpr:
-		body := BeginExpr{expr.body}
-		nvars := len(expr.params)
-		funcEnv, freeRefs := analyzeRefs(env, expr.params, expr.body)
-		code := assemble(compExpr(body, funcEnv, false, TAIL))
-		temp := newTemplate("", nvars, freeRefs, code)
+		temp := compFuncExpr(expr, env)
 		return seq(
 			gen(newCloseAsm(temp)),
 			genReturn(argp, tailp),
@@ -2928,59 +2898,146 @@ func macroexpandall(expr Expr) Expr {
 
 /// loading
 
-type Module struct {
-	f *Func
-}
-
-func topFunc(temps []*Template) *Func {
-	n := len(temps)
-	code := make([]Instr, 3*n+1)
-	for i := 0; i < 3*n; i += 3 {
-		code[i+0] = &frameInstr{i + 3}
-		code[i+1] = &closeInstr{temps[i/3]}
-		code[i+2] = &applyInstr{0}
-	}
-	code[3*n] = &returnInstr{}
-	return newFunc(
-		newTemplate("", 0, nil, code),
-		nil,
-	)
-}
-
-func fetchSourceModule(name, address string) (mod *Module, err os.Error) {
+func fetchSourceForms(name, address string) ([]Literal, os.Error) {
 	url := "http://" + address + "/" + name + ".lisp"
 	response, err := http.Get(url)
 	if err != nil {
-		err = os.NewError("fetchSourceModule: HTTP fail")
-		return
+		return nil, os.NewError("fetchSourceModule: HTTP fail")
 	}
 	defer response.Body.Close()
-	lits, err := readAll(response.Body)
-	if err != nil {
-		return
-	}
-	temps := make([]*Template, len(lits))
-	for i, lit := range lits {
-		expr, err := parse(lit)
-		if err != nil {
-			return
-		}
-		temps[i], err = compile(expr)
-		if err != nil {
-			return
-		}
-	}
-	mod = &Module{topFunc(temps)}
-	return
+	return readAll(response.Body)
 }
 
-func loadSourceFile(name string) {
-	mod, err := fetchSourceModule(name, *address)
-	if err != nil {
-		log.Fatalln(err)
+func parseToplevel(forms []Literal) ([]DefineExpr, os.Error) {
+	defs := make([]DefineExpr, len(forms))
+	for i, form := range forms {
+		expr, err := parse(form)
+		if err != nil {
+			return nil, err
+		}
+		def, ok := expr.(DefineExpr)
+		if !ok {
+			err = os.NewError("parseToplevel: form is not define")
+			return nil, err
+		}
+		defs[i] = def
 	}
-	m := newMachine(mod.f)
+	return defs, nil
+}
+
+func checkBindingUniqueness(defs []DefineExpr) os.Error {
+	set := newSymbolSet()
+	for _, def := range defs {
+		if set.contains(def.name) {
+			return os.NewError("multiple definitions for: " +
+				def.name.name)
+		}
+		set.include(def.name)
+	}
+	return nil
+}
+
+func analyzeCellLiteral(expr CallExpr) (Expr, os.Error) {
+	ref, ok := expr.funcExpr.(RefExpr)
+	if !ok || ref.name != intern("cellnew") {
+		return nil, os.NewError("bad cell literal")
+	}
+	if len(expr.argExprs) != 1 {
+		s := "fetchSourceModule: bad cell literal"
+		return nil, os.NewError(s)
+	}
+	initExpr := expr.argExprs[0]
+	return initExpr, nil
+}
+
+func build(forms []Literal) (map[*Symbol]Value, os.Error) {
+	defs, err := parseToplevel(forms)
+	if err != nil {
+		return nil, err
+	}
+	err = checkBindingUniqueness(defs)
+	if err != nil {
+		return nil, err
+	}
+	bindings := make(map[*Symbol]Value)
+	deps := make(map[*Symbol][]*Symbol)
+	thunks := make(map[*Symbol]func())
+	aliasThunk := func(alias, original *Symbol) func() {
+		return func() {
+			bindings[alias] = bindings[original]
+		}
+	}
+	for _, def := range defs {
+		switch expr := def.expr.(type) {
+		case FuncExpr:
+			bindings[def.name] = newFunc(
+				compFuncExpr(
+					macroexpandall(expr).(FuncExpr),
+					newEmptyEnv(),
+				),
+				[]Value{},
+			)
+		case RefExpr:
+			deps[def.name] = []*Symbol{expr.name}
+			thunks[def.name] = aliasThunk(def.name, expr.name)
+		case CallExpr:
+			initExpr, err := analyzeCellLiteral(expr)
+			if err != nil {
+				return nil, err
+			}
+			cell := new(Cell)
+			bindings[def.name] = cell
+			switch arg := initExpr.(type) {
+			case RefExpr:
+				deps[def.name] = []*Symbol{arg.name}
+				thunks[def.name] = func() {
+					cell.value = bindings[arg.name]
+				}
+			case QuoteExpr:
+				cell.value = arg.x
+			default:
+				return nil, os.NewError("bad cell literal")
+			}
+		}
+	}
+	// XXX this only works when dependencies never have dependencies
+	updated := newSymbolSet()
+	for _, def := range defs {
+		for _, name := range append(deps[def.name], def.name) {
+			thunk, ok := thunks[name]
+			if !ok || updated.contains(name) {
+				continue
+			}
+			thunk()
+			updated.include(name)
+		}
+	}
+	return bindings, nil
+}
+
+func loadSourceFile(name string) os.Error {
+	forms, err := fetchSourceForms(name, *address)
+	if err != nil {
+		return err
+	}
+	bindings, err := build(forms)
+	if err != nil {
+		return err
+	}
+	for sym, value := range bindings {
+		globals[sym.name] = value // TODO remove this
+	}
+	x, ok := bindings[intern("main")]
+	if !ok {
+		return nil
+	}
+	mainFunc, ok := x.(*Func)
+	if !ok {
+		return os.NewError("loadSourceFile: main is not a function")
+	}
+	m := newMachine(mainFunc)
 	m.run()
+	return nil
 }
 
 func initReader() {
@@ -2994,9 +3051,8 @@ func initReader() {
 	}
 }
 func initInterpreter() {
-	unboundGlobalValue = &List{emptyList, emptyList}
 	sharedPrimStack = make([]Value, 8)
-	globals = make(map[string]*Binding)
+	globals = make(map[string]Value)
 	symbolTable = make(map[string]*Symbol)
 	loadPrims()
 }
@@ -3009,6 +3065,9 @@ func init() {
 func main() {
 	flag.Parse()
 	for _, name := range flag.Args() {
-		loadSourceFile(name)
+		err := loadSourceFile(name)
+		if err != nil {
+			log.Fatalln(err)
+		}
 	}
 }

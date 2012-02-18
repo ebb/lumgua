@@ -246,4 +246,4 @@
 	      code)
        'end)))))
 
-(repl)
+(define main repl)
