@@ -3035,13 +3035,15 @@ func build(forms []Literal) (map[*Symbol]Value, os.Error) {
 	for _, def := range defs {
 		switch expr := def.expr.(type) {
 		case FuncExpr:
-			bindings[def.name] = newFunc(
+			f := newFunc(
 				compFuncExpr(
 					macroexpandall(expr).(FuncExpr),
 					newEmptyEnv(),
 				),
 				[]Value{},
 			)
+			bindings[def.name] = f
+			f.temp.name = def.name.name
 		case RefExpr:
 			deps[def.name] = []*Symbol{expr.name}
 			thunks[def.name] = aliasThunk(def.name, expr.name)
