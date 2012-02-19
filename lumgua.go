@@ -26,6 +26,9 @@ var address *string = flag.String("a", ":8082", "address")
 
 /// global state
 
+var definedGlobals *SymbolSet        // XXX kludge!
+var bindingsKludge map[*Symbol]Value // XXX kludge!
+
 var globals map[string]Value
 
 var symbolTable map[string]*Symbol
@@ -63,6 +66,7 @@ type Template struct {
 	nvars    int
 	freeRefs []FreeRef
 	code     []Instr
+	globals  []Value
 }
 
 type Func struct {
@@ -86,19 +90,20 @@ type Array struct {
 	vector.Vector
 }
 
-func newTemplate(name string, nvars int, freeRefs []FreeRef, code []Instr) *Template {
+func newTemplate(name string, nvars int, freeRefs []FreeRef, code []Instr, globals []Value) *Template {
 	return &Template{
-		name: name,
-		nvars: nvars,
+		name:     name,
+		nvars:    nvars,
 		freeRefs: freeRefs,
-		code: code,
+		code:     code,
+		globals:  globals,
 	}
 }
 
 func newFunc(temp *Template, env []Value) *Func {
 	return &Func{
 		temp: temp,
-		env: env,
+		env:  env,
 	}
 }
 
@@ -502,24 +507,19 @@ func (instr *constInstr) Sexp() Value {
 }
 
 type globalInstr struct {
-	name string
+	n int
 }
 
 func newGlobalInstr(arg Value) Instr {
-	return &globalInstr{arg.(*Symbol).name}
+	return &globalInstr{int(arg.(Number))}
 }
 
 func (instr *globalInstr) Exec(m *Machine) {
-	x, ok := globals[instr.name]
-	if !ok { // TODO this check should become redundant
-		m.throw("unbound global: " + instr.name)
-		return
-	}
-	m.a = x
+	m.a = m.f.temp.globals[instr.n]
 }
 
 func (instr *globalInstr) Sexp() Value {
-	return list(intern("global"), intern(instr.name))
+	return list(intern("global"), Number(instr.n))
 }
 
 type localInstr struct {
@@ -666,7 +666,7 @@ func (m *Machine) throw(s string) {
 		&frameInstr{m.pc - 1},
 		&constInstr{String(s)},
 		&pushInstr{},
-		&globalInstr{"throw"},
+		&constInstr{globals["throw"]}, // XXX
 		&applyInstr{1},
 	}
 	for _, instr := range code {
@@ -684,6 +684,7 @@ func freshStack() Stack {
 					&constInstr{intern("normal")},
 					&haltInstr{},
 				},
+				[]Value{},
 			),
 			nil,
 		),
@@ -901,27 +902,28 @@ func packCode(src Value) ([]Instr, os.Error) {
 }
 
 func primTemplateNew(args ...Value) (Value, os.Error) {
-	var nvars int
-	if n, ok := args[0].(Number); ok {
-		nvars = int(n)
-	} else {
-		return nil, os.NewError("templatenew: type error")
-	}
-	freeRefs, err := packFreeRefs(args[1])
-	if err != nil {
-		return nil, os.NewError("templatenew: invalid free references")
-	}
-	code, err := packCode(args[2])
-	if err != nil {
-		return nil, os.NewError("templatenew: invalid code")
-	}
-	temp := newTemplate(
-		"",
-		nvars,
-		freeRefs,
-		code,
-	)
-	return temp, nil
+	// var nvars int
+	// if n, ok := args[0].(Number); ok {
+	// 	nvars = int(n)
+	// } else {
+	// 	return nil, os.NewError("templatenew: type error")
+	// }
+	// freeRefs, err := packFreeRefs(args[1])
+	// if err != nil {
+	// 	return nil, os.NewError("templatenew: invalid free references")
+	// }
+	// code, err := packCode(args[2])
+	// if err != nil {
+	// 	return nil, os.NewError("templatenew: invalid code")
+	// }
+	// temp := newTemplate(
+	// 	"",
+	// 	nvars,
+	// 	freeRefs,
+	// 	code,
+	// )
+	// return temp, nil
+	return nil, os.NewError("templatenew: not implemented")
 }
 
 func unpackFreeRef(ref FreeRef) Value {
@@ -1274,17 +1276,6 @@ func primGe(args ...Value) (Value, os.Error) {
 	return truth(float64(a) >= float64(b)), nil
 }
 
-func primGlobal(args ...Value) (Value, os.Error) {
-	sym, ok := args[0].(*Symbol)
-	if !ok {
-		return nil, os.NewError("global: type error")
-	}
-	if x, ok := globals[sym.name]; ok {
-		return x, nil
-	}
-	return nil, os.NewError("global: unbound")
-}
-
 func primLog(args ...Value) (Value, os.Error) {
 	s, ok := args[0].(String)
 	if !ok {
@@ -1520,7 +1511,6 @@ var primDecls = [][]interface{}{
 	{"> a b", primGt},
 	{"<= a b", primLe},
 	{">= a b", primGe},
-	{"global name", primGlobal},
 	{"log text", primLog},
 	{"http method url args", primHttp},
 	{"now", primNow},
@@ -1546,6 +1536,7 @@ func makePrim(decl []interface{}) *Template {
 			&primInstr{name, prim},
 			&returnInstr{},
 		},
+		[]Value{},
 	)
 }
 
@@ -1564,6 +1555,7 @@ func loadPrims() {
 				&shiftInstr{},
 				&applyInstr{-1},
 			},
+			[]Value{},
 		),
 		nil,
 	))
@@ -1577,6 +1569,7 @@ func loadPrims() {
 				&shiftInstr{},
 				&applyInstr{1},
 			},
+			[]Value{},
 		),
 		nil,
 	))
@@ -2238,9 +2231,9 @@ type OrExpr struct {
 }
 
 type MatchClause struct {
-	tag *Symbol
+	tag    *Symbol
 	params []*Symbol
-	body []Expr
+	body   []Expr
 }
 
 type MatcherExpr struct {
@@ -2248,7 +2241,7 @@ type MatcherExpr struct {
 }
 
 type MatchExpr struct {
-	x Expr
+	x       Expr
 	clauses []MatchClause
 }
 
@@ -2257,21 +2250,21 @@ type QuasiExpr struct {
 }
 
 func (_ AmpersandExpr) exprVariant() {}
-func (_ LetExpr) exprVariant()   {}
-func (_ DefineExpr) exprVariant() {}
-func (_ CondExpr) exprVariant() {}
-func (_ AndExpr) exprVariant() {}
-func (_ OrExpr) exprVariant() {}
-func (_ MatcherExpr) exprVariant() {}
-func (_ MatchExpr) exprVariant() {}
-func (_ QuasiExpr) exprVariant() {}
-func (_ RefExpr) exprVariant()   {}
-func (_ QuoteExpr) exprVariant() {}
-func (_ IfExpr) exprVariant()    {}
-func (_ BeginExpr) exprVariant() {}
-func (_ JmpExpr) exprVariant()   {}
-func (_ FuncExpr) exprVariant()  {}
-func (_ CallExpr) exprVariant()  {}
+func (_ LetExpr) exprVariant()       {}
+func (_ DefineExpr) exprVariant()    {}
+func (_ CondExpr) exprVariant()      {}
+func (_ AndExpr) exprVariant()       {}
+func (_ OrExpr) exprVariant()        {}
+func (_ MatcherExpr) exprVariant()   {}
+func (_ MatchExpr) exprVariant()     {}
+func (_ QuasiExpr) exprVariant()     {}
+func (_ RefExpr) exprVariant()       {}
+func (_ QuoteExpr) exprVariant()     {}
+func (_ IfExpr) exprVariant()        {}
+func (_ BeginExpr) exprVariant()     {}
+func (_ JmpExpr) exprVariant()       {}
+func (_ FuncExpr) exprVariant()      {}
+func (_ CallExpr) exprVariant()      {}
 
 type MacroExpr interface {
 	expand() Expr
@@ -2279,13 +2272,13 @@ type MacroExpr interface {
 }
 
 func (_ AmpersandExpr) macroExprVariant() {}
-func (_ LetExpr) macroExprVariant() {}
-func (_ CondExpr) macroExprVariant() {}
-func (_ AndExpr) macroExprVariant() {}
-func (_ OrExpr) macroExprVariant() {}
-func (_ MatcherExpr) macroExprVariant() {}
-func (_ MatchExpr) macroExprVariant() {}
-func (_ QuasiExpr) macroExprVariant() {}
+func (_ LetExpr) macroExprVariant()       {}
+func (_ CondExpr) macroExprVariant()      {}
+func (_ AndExpr) macroExprVariant()       {}
+func (_ OrExpr) macroExprVariant()        {}
+func (_ MatcherExpr) macroExprVariant()   {}
+func (_ MatchExpr) macroExprVariant()     {}
+func (_ QuasiExpr) macroExprVariant()     {}
 
 func (expr AmpersandExpr) expand() Expr {
 	acc := Expr(QuoteExpr{emptyList})
@@ -2455,7 +2448,6 @@ func (expr MatchExpr) expand() Expr {
 
 /// compiler
 
-// Either an AsmLabel or an AsmInstr.
 type Asm interface {
 	asmVariant()
 }
@@ -2519,8 +2511,8 @@ func newReturnAsm() Asm {
 	return &AsmInstr{&returnInstr{}, nil}
 }
 
-func newGlobalAsm(name string) Asm {
-	return &AsmInstr{&globalInstr{name}, nil}
+func newGlobalAsm(n int) Asm {
+	return &AsmInstr{&globalInstr{n}, nil}
 }
 
 func newConstAsm(x Value) Asm {
@@ -2590,13 +2582,14 @@ func genReturn(argp bool, tailp int) []Asm {
 }
 
 type CompEnv struct {
-	local, free map[*Symbol]int
+	local, free, global map[*Symbol]int
 }
 
 func newEmptyEnv() *CompEnv {
 	return &CompEnv{
-		local: make(map[*Symbol]int),
-		free:  make(map[*Symbol]int),
+		local:  make(map[*Symbol]int),
+		free:   make(map[*Symbol]int),
+		global: make(map[*Symbol]int),
 	}
 }
 
@@ -2610,6 +2603,14 @@ func (env *CompEnv) symbolSet() *SymbolSet {
 		free[i] = sym
 	}
 	return newSymbolSet(local, free)
+}
+
+func (env *CompEnv) globals() []Value {
+	g := make([]Value, len(env.global))
+	for sym, i := range env.global {
+		g[i] = sym
+	}
+	return g
 }
 
 type SymbolSet struct {
@@ -2693,18 +2694,52 @@ func findFree(expr Expr, b, p *SymbolSet) *SymbolSet {
 	return refs
 }
 
+func collectGlobals(globals map[*Symbol]int, nonglobals *SymbolSet, exprs []Expr) {
+	for _, expr := range exprs {
+		findGlobals(globals, nonglobals, expr)
+	}
+}
+
+func findGlobals(globals map[*Symbol]int, nonglobals *SymbolSet, expr Expr) {
+	switch expr := expr.(type) {
+	case RefExpr:
+		sym := expr.name
+		if nonglobals.contains(sym) {
+			return
+		}
+		_, ok := globals[sym]
+		if !ok {
+			if !definedGlobals.contains(sym) {
+				panic("findGlobals: undefined global " +
+					sym.name)
+			}
+			globals[sym] = len(globals)
+		}
+	case IfExpr:
+		findGlobals(globals, nonglobals, expr.condExpr)
+		findGlobals(globals, nonglobals, expr.thenExpr)
+		findGlobals(globals, nonglobals, expr.elseExpr)
+	case BeginExpr:
+		collectGlobals(globals, nonglobals, expr.body)
+	case JmpExpr:
+		findGlobals(globals, nonglobals, expr.expr)
+	case CallExpr:
+		findGlobals(globals, nonglobals, expr.funcExpr)
+		collectGlobals(globals, nonglobals, expr.argExprs)
+	}
+}
+
 func analyzeRefs(env *CompEnv, locals []*Symbol, body []Expr) (*CompEnv, []FreeRef) {
 	freshEnv := newEmptyEnv()
 	freeRefs := []FreeRef{}
 	refs := collectFree(body, env.symbolSet(), newSymbolSet(locals))
+	nonglobals := newSymbolSet(locals).union(refs)
+	collectGlobals(freshEnv.global, nonglobals, body)
 	nfree := 0
 	for i, sym := range locals {
 		freshEnv.local[sym] = i
 	}
 	for ref, _ := range refs.table {
-		if _, ok := freshEnv.local[ref]; ok {
-			continue
-		}
 		if i, ok := env.local[ref]; ok {
 			freeRefs = append(freeRefs, FreeRef{LOCAL, i})
 			freshEnv.free[ref] = nfree
@@ -2728,7 +2763,11 @@ func newRefAsm(env *CompEnv, sym *Symbol) Asm {
 	if i, ok := env.free[sym]; ok {
 		return newFreeAsm(i)
 	}
-	return newGlobalAsm(sym.name)
+	if i, ok := env.global[sym]; ok {
+		return newGlobalAsm(i)
+	}
+	panic("newRefAsm: cannot locate variable " + sym.name)
+	return nil
 }
 
 func compFuncExpr(expr FuncExpr, env *CompEnv) *Template {
@@ -2736,7 +2775,7 @@ func compFuncExpr(expr FuncExpr, env *CompEnv) *Template {
 	nvars := len(expr.params)
 	funcEnv, freeRefs := analyzeRefs(env, expr.params, expr.body)
 	code := assemble(compExpr(body, funcEnv, false, TAIL))
-	return newTemplate("", nvars, freeRefs, code)
+	return newTemplate("", nvars, freeRefs, code, funcEnv.globals())
 }
 
 func compExpr(expr Expr, env *CompEnv, argp bool, tailp int) []Asm {
@@ -2776,7 +2815,7 @@ func compExpr(expr Expr, env *CompEnv, argp bool, tailp int) []Asm {
 		body := expr.body
 		asms := seq()
 		n := len(body)
-		for i := 0; i < n - 1; i++ {
+		for i := 0; i < n-1; i++ {
 			asms = seq(
 				asms,
 				compExpr(body[i], env, false, NONTAIL),
@@ -2840,9 +2879,14 @@ func compile(expr Expr) (temp *Template, err os.Error) {
 			panic(x)
 		}
 	}()
-	core := macroexpandall(expr)
-	code := assemble(compExpr(core, newEmptyEnv(), false, TAIL))
-	temp = newTemplate("", 0, []FreeRef{}, code)
+	temp = compFuncExpr(
+		FuncExpr{[]*Symbol{}, []Expr{macroexpandall(expr)}},
+		newEmptyEnv(),
+	)
+	temps := findTemplates(temp)
+	for _, temp := range temps {
+		linkTemplate(temp, bindingsKludge)
+	}
 	return
 }
 
@@ -2925,16 +2969,16 @@ func parseToplevel(forms []Literal) ([]DefineExpr, os.Error) {
 	return defs, nil
 }
 
-func checkBindingUniqueness(defs []DefineExpr) os.Error {
+func checkBindingUniqueness(defs []DefineExpr) (*SymbolSet, os.Error) {
 	set := newSymbolSet()
 	for _, def := range defs {
 		if set.contains(def.name) {
-			return os.NewError("multiple definitions for: " +
+			return nil, os.NewError("multiple definitions for: " +
 				def.name.name)
 		}
 		set.include(def.name)
 	}
-	return nil
+	return set, nil
 }
 
 func analyzeCellLiteral(expr CallExpr) (Expr, os.Error) {
@@ -2950,12 +2994,25 @@ func analyzeCellLiteral(expr CallExpr) (Expr, os.Error) {
 	return initExpr, nil
 }
 
+func findTemplates(temp *Template) []*Template {
+	temps := []*Template{temp}
+	for _, instr := range temp.code {
+		if c, ok := instr.(*closeInstr); ok {
+			temps = append(temps, findTemplates(c.temp)...)
+		}
+	}
+	return temps
+}
+
+func linkTemplate(temp *Template, bindings map[*Symbol]Value) {
+	globals := temp.globals
+	for i, g := range globals {
+		globals[i] = bindings[g.(*Symbol)]
+	}
+}
+
 func build(forms []Literal) (map[*Symbol]Value, os.Error) {
 	defs, err := parseToplevel(forms)
-	if err != nil {
-		return nil, err
-	}
-	err = checkBindingUniqueness(defs)
 	if err != nil {
 		return nil, err
 	}
@@ -2966,6 +3023,14 @@ func build(forms []Literal) (map[*Symbol]Value, os.Error) {
 		return func() {
 			bindings[alias] = bindings[original]
 		}
+	}
+	definedGlobals, err = checkBindingUniqueness(defs)
+	if err != nil {
+		return nil, err
+	}
+	for name, val := range globals {
+		definedGlobals.include(intern(name))
+		bindings[intern(name)] = val
 	}
 	for _, def := range defs {
 		switch expr := def.expr.(type) {
@@ -3012,6 +3077,22 @@ func build(forms []Literal) (map[*Symbol]Value, os.Error) {
 			updated.include(name)
 		}
 	}
+	linked := make(map[*Template]bool)
+	for _, val := range bindings {
+		f, ok := val.(*Func)
+		if !ok {
+			continue
+		}
+		temps := findTemplates(f.temp)
+		for _, temp := range temps {
+			if _, ok := linked[temp]; ok {
+				continue
+			}
+			linkTemplate(temp, bindings)
+			linked[temp] = true
+		}
+	}
+	bindingsKludge = bindings
 	return bindings, nil
 }
 
@@ -3042,14 +3123,15 @@ func loadSourceFile(name string) os.Error {
 
 func initReader() {
 	readTable = map[byte]func(io.ByteScanner) Literal{
-		'"': readString,
+		'"':  readString,
 		'\'': readQuote,
-		'`': readQuasi,
-		',': readComma,
-		'&': readAmpersand,
-		'(': readList,
+		'`':  readQuasi,
+		',':  readComma,
+		'&':  readAmpersand,
+		'(':  readList,
 	}
 }
+
 func initInterpreter() {
 	sharedPrimStack = make([]Value, 8)
 	globals = make(map[string]Value)
