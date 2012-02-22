@@ -2942,6 +2942,49 @@ func macroexpandall(expr Expr) Expr {
 
 /// loading
 
+// A dependency value indicates that the object identified by the b field
+// depends on the object identified by the a field.
+type dependency struct {
+	a, b int
+}
+
+// Topologically sort the identifiers contained in d assuming that all identifiers
+// are less than n. If there are cycles, the output only contains those identifiers
+// that do not depend on any identifier that participates in a cycle.
+func tsort(n int, d []dependency) []int {
+	dependents := make([][]int, n)
+	counts := make([]int, n)
+	stack := []int{}
+	output := []int{}
+	for i := 0; i < n; i++ {
+		dependents[i] = []int{}
+	}
+	for _, dep := range d {
+		counts[dep.b]++
+		dependents[dep.a] = append(dependents[dep.a], dep.b)
+	}
+	for i := 0; i < n; i++ {
+		if counts[i] == 0 {
+			stack = append(stack, i)
+		}
+	}
+	k := len(stack)
+	for k > 0 {
+		k--
+		e := stack[k]
+		stack = stack[:k]
+		output = append(output, e)
+		for _, b := range dependents[e] {
+			counts[b]--
+			if counts[b] == 0 {
+				stack = append(stack, b)
+				k++
+			}
+		}
+	}
+	return output
+}
+
 func fetchSourceForms(name, address string) ([]Literal, os.Error) {
 	url := "http://" + address + "/" + name + ".lisp"
 	response, err := http.Get(url)
