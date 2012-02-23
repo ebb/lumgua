@@ -2949,7 +2949,7 @@ type dependency struct {
 }
 
 // Topologically sort the identifiers contained in d assuming that all identifiers
-// are less than n. If there are cycles, the output only contains those identifiers
+// i satisfy 0<=i<n. If there are cycles, the output only contains those identifiers
 // that do not depend on any identifier that participates in a cycle.
 func tsort(n int, d []dependency) []int {
 	dependents := make([][]int, n)
@@ -2983,6 +2983,63 @@ func tsort(n int, d []dependency) []int {
 		}
 	}
 	return output
+}
+
+type StringDepGraph struct {
+	ids map[string]int
+	deps map[int]map[int]bool
+}
+
+func newStringDepGraph() *StringDepGraph {
+	return &StringDepGraph{
+		ids: make(map[string]int),
+		deps: make(map[int]map[int]bool),
+	}
+}
+
+func (g *StringDepGraph) ensureId(s string) int {
+	id, ok := g.ids[s]
+	if !ok {
+		id = len(g.ids)
+		g.ids[s] = id
+	}
+	return id
+}
+
+func (g *StringDepGraph) ensureDep(aId, bId int) {
+	m, ok := g.deps[aId]
+	if !ok {
+		m = make(map[int]bool)
+		g.deps[aId] = m
+	}
+	m[bId] = true
+}
+
+func (g *StringDepGraph) addDep(a, b string) {
+	aId := g.ensureId(a)
+	bId := g.ensureId(b)
+	g.ensureDep(aId, bId)
+}
+
+// The second return value indicates whether the graph contains any cycles.
+func (g *StringDepGraph) tsort() ([]string, bool) {
+	d := []dependency{}
+	for aId, m := range g.deps {
+		for bId, _ := range m {
+			d = append(d, dependency{aId, bId})
+		}
+	}
+	n := len(g.ids)
+	sortedIds := tsort(n, d)
+	sortedStrs := make([]string, len(sortedIds))
+	strs := make([]string, n)
+	for s, id := range g.ids {
+		strs[id] = s
+	}
+	for i, id := range sortedIds {
+		sortedStrs[i] = strs[id]
+	}
+	return sortedStrs, (n > len(sortedStrs))
 }
 
 func fetchSourceForms(name, address string) ([]Literal, os.Error) {
@@ -3060,7 +3117,7 @@ func build(forms []Literal) (map[*Symbol]Value, os.Error) {
 		return nil, err
 	}
 	bindings := make(map[*Symbol]Value)
-	deps := make(map[*Symbol][]*Symbol)
+	deps := newStringDepGraph()
 	thunks := make(map[*Symbol]func())
 	aliasThunk := func(alias, original *Symbol) func() {
 		return func() {
@@ -3088,7 +3145,7 @@ func build(forms []Literal) (map[*Symbol]Value, os.Error) {
 			bindings[def.name] = f
 			f.temp.name = def.name.name
 		case RefExpr:
-			deps[def.name] = []*Symbol{expr.name}
+			deps.addDep(expr.name.name, def.name.name)
 			thunks[def.name] = aliasThunk(def.name, expr.name)
 		case CallExpr:
 			initExpr, err := analyzeCellLiteral(expr)
@@ -3099,7 +3156,7 @@ func build(forms []Literal) (map[*Symbol]Value, os.Error) {
 			bindings[def.name] = cell
 			switch arg := initExpr.(type) {
 			case RefExpr:
-				deps[def.name] = []*Symbol{arg.name}
+				deps.addDep(arg.name.name, def.name.name)
 				thunks[def.name] = func() {
 					cell.value = bindings[arg.name]
 				}
@@ -3110,17 +3167,16 @@ func build(forms []Literal) (map[*Symbol]Value, os.Error) {
 			}
 		}
 	}
-	// XXX this only works when dependencies never have dependencies
-	updated := newSymbolSet()
-	for _, def := range defs {
-		for _, name := range append(deps[def.name], def.name) {
-			thunk, ok := thunks[name]
-			if !ok || updated.contains(name) {
-				continue
-			}
-			thunk()
-			updated.include(name)
+	sortedNames, hasCycle := deps.tsort()
+	if hasCycle {
+		return nil, os.NewError("build: cyclic value dependencies")
+	}
+	for _, name := range sortedNames {
+		thunk, ok := thunks[intern(name)]
+		if !ok {
+			continue
 		}
+		thunk()
 	}
 	linked := make(map[*Template]bool)
 	for _, val := range bindings {
