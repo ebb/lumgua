@@ -1119,19 +1119,20 @@ func httpPut(rawURL string, body string) os.Error {
 	if err != nil {
 		return os.NewError("http: parse url fail: " + err.String())
 	}
-	request := &http.Request{
-		URL:    bakedURL,
-		RawURL: rawURL,
-		Method: "PUT",
-		Header: http.Header(
-			map[string][]string{
-				"Content-Type": []string{
-					"text/plain; charset=utf-8",
-				},
+	header := http.Header(
+		map[string][]string{
+			"Content-Type": []string{
+				"text/plain; charset=utf-8",
 			},
-		),
-		Host: bakedURL.Host,
-		Body: ioutil.NopCloser(strings.NewReader(body)),
+		},
+	)
+	request := &http.Request{
+		URL:           bakedURL,
+		RawURL:        rawURL,
+		Method:        "PUT",
+		Header:        header,
+		Host:          bakedURL.Host,
+		Body:          ioutil.NopCloser(strings.NewReader(body)),
 		ContentLength: int64(len(body)),
 	}
 	response, err := http.DefaultClient.Do(request)
