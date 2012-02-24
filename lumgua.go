@@ -1635,10 +1635,6 @@ func newListLiteral(items ...Literal) *ListLiteral {
 	return &ListLiteral{items}
 }
 
-func (list *ListLiteral) empty() bool {
-	return (len(list.items) == 0)
-}
-
 func (list *ListLiteral) head() Literal {
 	return list.items[0]
 }
@@ -1715,7 +1711,7 @@ func (x *ListLiteral) value() Value {
 }
 
 func parseCallExpr(form *ListLiteral) Expr {
-	if form.empty() {
+	if form.len() == 0 {
 		panic("parseExpr: empty call")
 	}
 	funcExpr := parseExpr(form.head())
@@ -1740,7 +1736,7 @@ func parseParams(lit Literal) []*Symbol {
 
 func parseInits(lit Literal) []InitPair {
 	list, ok := lit.(*ListLiteral)
-	if !ok || list.empty() {
+	if !ok || list.len() == 0 {
 		panic("parseExpr: ill-formed init list")
 	}
 	inits := make([]InitPair, list.len())
@@ -1802,7 +1798,7 @@ func expandQuasi(lit Literal) Literal {
 		return newListLiteral(intern("quote"), lit)
 	}
 	x := lit.(*ListLiteral)
-	if x.empty() {
+	if x.len() == 0 {
 		return newListLiteral(intern("quote"), lit)
 	}
 	head := x.head()
@@ -1847,7 +1843,7 @@ func parseMatchClause(lit Literal) MatchClause {
 		return clause
 	}
 	pattern, ok := x.head().(*ListLiteral)
-	if !ok || pattern.empty() {
+	if !ok || pattern.len() == 0 {
 		panic("parseExpr: ill-formed match clause")
 	}
 	clause.tag, ok = pattern.head().(*Symbol)
@@ -1878,7 +1874,7 @@ func parseExpr(lit Literal) Expr {
 	if !ok {
 		panic("parseExpr: nonliteral")
 	}
-	if x.empty() {
+	if x.len() == 0 {
 		panic("parseExpr: empty expression")
 	}
 	head, ok := x.head().(*Symbol)
@@ -1954,7 +1950,7 @@ func parseExpr(lit Literal) Expr {
 		case *Symbol:
 			return DefineExpr{pattern, parseExpr(x.at(2))}
 		case *ListLiteral:
-			if pattern.empty() {
+			if pattern.len() == 0 {
 				panic("parseExpr: ill-formed define")
 			}
 			name, ok := pattern.head().(*Symbol)
