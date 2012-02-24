@@ -1153,14 +1153,6 @@ func primLog(args ...Value) (Value, os.Error) {
 	return emptyList, nil
 }
 
-type stringBody struct {
-	*strings.Reader
-}
-
-func (b stringBody) Close() os.Error {
-	return nil
-}
-
 func httpPut(rawURL string, body string) os.Error {
 	bakedURL, err := url.Parse(rawURL)
 	if err != nil {
@@ -1178,9 +1170,7 @@ func httpPut(rawURL string, body string) os.Error {
 			},
 		),
 		Host: bakedURL.Host,
-		Body: stringBody{
-			strings.NewReader(body),
-		},
+		Body: ioutil.NopCloser(strings.NewReader(body)),
 		ContentLength: int64(len(body)),
 	}
 	response, err := http.DefaultClient.Do(request)
