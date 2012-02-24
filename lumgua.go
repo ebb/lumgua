@@ -217,34 +217,6 @@ func list(elements ...Value) Value {
 	return x
 }
 
-func array(x Value) (*Array, os.Error) {
-	a := new(Array)
-	err := forEach(x, func(elt Value) os.Error {
-		a.Push(elt)
-		return nil
-	})
-	if err != nil {
-		return nil, os.NewError("array: bad argument")
-	}
-	return a, nil
-}
-
-func tuple(x Value, preds ...func(Value) bool) (*Array, os.Error) {
-	a, err := array(x)
-	if err != nil {
-		return nil, os.NewError("tuple: bad argument")
-	}
-	if a.Len() != len(preds) {
-		return nil, os.NewError("tuple: bad argument")
-	}
-	for i, pred := range preds {
-		if !pred(a.At(i).(Value)) {
-			return nil, os.NewError("tuple: bad argument")
-		}
-	}
-	return a, nil
-}
-
 /// combinators
 
 func forEach(x Value, f func(Value) os.Error) os.Error {
@@ -260,17 +232,6 @@ func forEach(x Value, f func(Value) os.Error) os.Error {
 		list = list.tail
 	}
 	return nil
-}
-
-func listMap(x Value, f func(Value) *List) *List {
-	list, ok := x.(*List)
-	if !ok {
-		panic("listMap: type error")
-	}
-	if list == emptyList {
-		return emptyList
-	}
-	return &List{f(list.head), listMap(list.tail, f)}
 }
 
 /// interpreter
