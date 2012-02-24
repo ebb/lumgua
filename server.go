@@ -8,6 +8,7 @@ import (
 	"io/ioutil"
 	"os"
 	"os/signal"
+	"syscall"
 	"time"
 )
 
@@ -64,9 +65,22 @@ func evalHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func signalHandler() {
-	s := <-signal.Incoming
-	fmt.Fprintln(os.Stderr, "Exiting due to signal: " + s.String())
-	os.Exit(0)
+	for {
+		s := <-signal.Incoming
+		u, ok := s.(os.UnixSignal)
+		if !ok {
+			fmt.Fprintln(os.Stderr, "Ignoring non-Unix signal.")
+			continue
+		}
+		switch u {
+		case syscall.SIGINT, syscall.SIGTERM:
+			fmt.Fprintln(
+				os.Stderr,
+				"Exiting due to signal: " + u.String(),
+			)
+			os.Exit(0)
+		}
+	}
 }
 
 func init() {
