@@ -76,9 +76,14 @@ func signalHandler() {
 		case syscall.SIGINT, syscall.SIGTERM:
 			fmt.Fprintln(
 				os.Stderr,
-				"Exiting due to signal: " + u.String(),
+				"Exiting due to signal: "+u.String(),
 			)
 			os.Exit(0)
+		default:
+			fmt.Fprintln(
+				os.Stderr,
+				"Ignoring signal: "+u.String(),
+			)
 		}
 	}
 }
