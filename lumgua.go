@@ -625,13 +625,12 @@ var sharedPrimStack []Value
 
 func (instr *primInstr) Exec(m *Machine) {
 	nvars := m.f.temp.nvars
-	n := nvars
-	if n > cap(sharedPrimStack) {
+	if nvars > cap(sharedPrimStack) {
 		m.throw("too many arguments to prim")
 		return
 	}
-	sharedPrimStack = sharedPrimStack[0:n]
-	for i := 0; i < n; i++ {
+	sharedPrimStack = sharedPrimStack[0:nvars]
+	for i := 0; i < nvars; i++ {
 		sharedPrimStack[i] = m.stack.At(m.fp + i).(Value)
 	}
 	a, err := instr.prim(sharedPrimStack...)
@@ -2986,13 +2985,13 @@ func tsort(n int, d []dependency) []int {
 }
 
 type StringDepGraph struct {
-	ids map[string]int
+	ids  map[string]int
 	deps map[int]map[int]bool
 }
 
 func newStringDepGraph() *StringDepGraph {
 	return &StringDepGraph{
-		ids: make(map[string]int),
+		ids:  make(map[string]int),
 		deps: make(map[int]map[int]bool),
 	}
 }
