@@ -1,3 +1,7 @@
+(define (consp x)
+  (and (= (typeof x) 'list)
+       (!= x '())))
+
 (define (nilp x)
   (= x '()))
 
@@ -82,9 +86,6 @@
 (define (not x)
   (if x F T))
 
-(define (atomp x)
-  (or (nilp x) (numberp x) (symbolp x) (stringp x) (boolp x)))
-
 (define first car)
 
 (define second cadr)
@@ -117,27 +118,30 @@
 			    (else c))))))
     (cellget se)))
 
-(define (writecons x)
-  (let ((inards (foldl (func (z e)
-			 (strcat &(z " " (write e))))
-		       (write (car x))
-		       (cdr x))))
-    (strcat &("(" inards ")"))))
+(define (writelist x)
+  (cond
+   ((= x '())
+    "()")
+   (else
+    (let ((inards (foldl (func (z e)
+			   (strcat &(z " " (write e))))
+			 (write (car x))
+			 (cdr x))))
+      (strcat &("(" inards ")"))))))
 
 (define (write x)
-  (cond
-   ((numberp x) (itoa x))
-   ((symbolp x) (symbolname x))
-   ((nilp x) "()")
-   ((consp x) (writecons x))
-   ((templatep x) "<template>")
-   ((funcp x) "<func>")
-   ((contp x) "<cont>")
-   ((stringp x) (strcat &("\"" (escape x) "\"")))
-   ((boolp x) (if x "<true>" "<false>"))
-   ((cellp x) "<cell>")
-   ((arrayp x) "<array>")
-   (else (throw "write: unknown type"))))
+  (match &((typeof x))
+    ((bool) (if x "<true>" "<false>"))
+    ((number) (itoa x))
+    ((symbol) (symbolname x))
+    ((string) (strcat &("\"" (escape x) "\"")))
+    ((list) (writelist x))
+    ((template) "<template>")
+    ((func) "<func>")
+    ((cont) "<cont>")
+    ((cell) "<cell>")
+    ((array) "<array>")
+    (else (throw "write: unknown type"))))
 
 (define (showoneframe stack f fp)
   (match (funcopen f)
@@ -158,12 +162,12 @@
 	  (log (cellget s))))))))
 
 (define (showbacktraceloop stack fp)
-  (cond
-   ((!= fp 0)
-    (let ((f (arrayget stack (- fp 3)))
-	  (fp (arrayget stack (- fp 2))))
-      (showoneframe stack f fp)
-      (jmp (showbacktraceloop stack fp))))))
+  (jmp (cond
+	((!= fp 0)
+	 (let ((f (arrayget stack (- fp 3)))
+	       (fp (arrayget stack (- fp 2))))
+	   (showoneframe stack f fp)
+	   (showbacktraceloop stack fp))))))
 
 (define (showbacktrace c)
   (match (contopen c)
@@ -205,10 +209,10 @@
 		       exps))))))
 
 (define (detect pred x)
-  (cond
-   ((nilp x) F)
-   ((pred (car x)) T)
-   (else (jmp (detect pred (cdr x))))))
+  (jmp (cond
+	((nilp x) F)
+	((pred (car x)) T)
+	(else (detect pred (cdr x))))))
 
 (define (member x s)
   (detect (func (y) (= x y)) s))
@@ -228,22 +232,22 @@
      (showtemplate temp nesting))))
 
 (define (showtemplate template nesting)
-  (match (templateopen template)
-    ((template name nvars freerefs code)
-     (cond
-      ((consp nesting)
-       (match (nth (car nesting) code)
-	 ((close template)
-	  (showtemplate template (cdr nesting)))))
-      (else
-       (log (strcat &("name: " name)))
-       (log (strcat &("nvars: " (write nvars))))
-       (log (strcat &("freerefs: " (write freerefs))))
-       (foldl (func (pc instr)
-		(showinstr pc instr)
-		(+ pc 1))
-	      0
-	      code)
-       'end)))))
+  (jmp (match (templateopen template)
+	 ((template name nvars freerefs code)
+	  (cond
+	   ((= nesting '())
+	    (log (strcat &("name: " name)))
+	    (log (strcat &("nvars: " (write nvars))))
+	    (log (strcat &("freerefs: " (write freerefs))))
+	    (foldl (func (pc instr)
+		     (showinstr pc instr)
+		     (+ pc 1))
+		   0
+		   code)
+	    'end)
+	   (else
+	    (match (nth (car nesting) code)
+	      ((close template)
+	       (showtemplate template (cdr nesting))))))))))
 
 (define main repl)

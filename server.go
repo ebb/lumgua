@@ -3,12 +3,11 @@ package main
 import (
 	"flag"
 	"fmt"
-	"http"
+	"net/http"
 	"io"
 	"io/ioutil"
 	"os"
 	"os/signal"
-	"syscall"
 	"time"
 )
 
@@ -50,7 +49,7 @@ func evalHandler(w http.ResponseWriter, r *http.Request) {
 		case text := <-evalChan:
 			_, err := w.Write(text)
 			if err != nil {
-				println(err.String())
+				println(err.Error())
 			}
 		case <-timeoutChan:
 		}
@@ -65,27 +64,11 @@ func evalHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func signalHandler() {
-	for {
-		s := <-signal.Incoming
-		u, ok := s.(os.UnixSignal)
-		if !ok {
-			fmt.Fprintln(os.Stderr, "Ignoring non-Unix signal.")
-			continue
-		}
-		switch u {
-		case syscall.SIGINT, syscall.SIGTERM:
-			fmt.Fprintln(
-				os.Stderr,
-				"Exiting due to signal: "+u.String(),
-			)
-			os.Exit(0)
-		default:
-			fmt.Fprintln(
-				os.Stderr,
-				"Ignoring signal: "+u.String(),
-			)
-		}
-	}
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt)
+	<-c
+	fmt.Fprintln(os.Stderr, "Exiting due to interrupt signal.")
+	os.Exit(0)
 }
 
 func init() {
@@ -101,6 +84,6 @@ func main() {
 	go signalHandler()
 	err := http.ListenAndServe(*address, nil)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err.String())
+		fmt.Fprintln(os.Stderr, err.Error())
 	}
 }
