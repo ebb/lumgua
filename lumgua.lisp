@@ -242,3 +242,8 @@
 		  (showtemplate template (cdr nesting))))))))))
 
 (define main repl)
+
+; some tests
+;
+; (foo)
+; (showfunc showfunc '())

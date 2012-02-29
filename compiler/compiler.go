@@ -10,35 +10,15 @@ import (
 var DefinedGlobals *SymbolSet        // XXX kludge!
 var BindingsKludge map[*Symbol]Value // XXX kludge!
 
-func seq(seqs ...[]Asm) []Asm {
-	code := []Asm{}
-	for _, seq := range seqs {
-		code = append(code, seq...)
-	}
-	return code
-}
-
-func gen(code ...Asm) []Asm {
-	return code
-}
+var pushProg Prog
+var emptyProg Prog
+var returnProg Prog
 
 const (
 	NONTAIL = iota
 	TAIL
 	JMP
 )
-
-// Only for use when the tail expression is not a call.
-func genReturn(argp bool, tailp int) []Asm {
-	code := make([]Asm, 0, 2)
-	if argp {
-		code = append(code, NewPushAsm())
-	}
-	if tailp != NONTAIL {
-		code = append(code, NewReturnAsm())
-	}
-	return code
-}
 
 type CompEnv struct {
 	local, free, global map[*Symbol]int
@@ -215,17 +195,17 @@ func analyzeRefs(env *CompEnv, locals []*Symbol, body []Expr) (*CompEnv, []FreeR
 	return freshEnv, freeRefs
 }
 
-func newRefAsm(env *CompEnv, sym *Symbol) Asm {
+func refProg(env *CompEnv, sym *Symbol) Prog {
 	if i, ok := env.local[sym]; ok {
-		return NewLocalAsm(i)
+		return GenLocal(i)
 	}
 	if i, ok := env.free[sym]; ok {
-		return NewFreeAsm(i)
+		return GenFree(i)
 	}
 	if i, ok := env.global[sym]; ok {
-		return NewGlobalAsm(i)
+		return GenGlobal(i)
 	}
-	panic("newRefAsm: cannot locate variable " + sym.Name)
+	panic("refProg: cannot locate variable " + sym.Name)
 	return nil
 }
 
@@ -237,94 +217,104 @@ func CompFuncExpr(expr FuncExpr, env *CompEnv) *Template {
 	return NewTemplate("", nvars, freeRefs, code, funcEnv.globals())
 }
 
-func compExpr(expr Expr, env *CompEnv, argp bool, tailp int) []Asm {
+func leafReturnProg(argp bool, tailp int) Prog {
+	if argp {
+		return pushProg
+	}
+	if tailp == NONTAIL {
+		return emptyProg
+	}
+	return returnProg
+}	
+
+func compExpr(expr Expr, env *CompEnv, argp bool, tailp int) Prog {
 	switch expr := expr.(type) {
 	case QuoteExpr:
-		return seq(
-			gen(NewConstAsm(expr.X)),
-			genReturn(argp, tailp),
+		return GenBlock(
+			GenConst(expr.X),
+			leafReturnProg(argp, tailp),
 		)
 	case RefExpr:
-		return seq(
-			gen(newRefAsm(env, expr.Name)),
-			genReturn(argp, tailp),
+		return GenBlock(
+			refProg(env, expr.Name),
+			leafReturnProg(argp, tailp),
 		)
 	case IfExpr:
 		label0 := NewLabel()
 		label1 := NewLabel()
-		var jump1Seq, label1Seq, pushSeq []Asm
+		jump1Prog := emptyProg
+		label1Prog := emptyProg
+		pushProg := emptyProg
 		if tailp == NONTAIL {
-			jump1Seq = gen(NewJumpAsm(label1))
-			label1Seq = gen(label1)
+			jump1Prog = GenJump(label1)
+			label1Prog = label1
 		}
 		if argp {
-			pushSeq = gen(NewPushAsm())
+			pushProg = GenPush()
 		}
-		return seq(
+		return GenBlock(
 			compExpr(expr.CondExpr, env, false, NONTAIL),
-			gen(NewFjumpAsm(label0)),
+			GenFjump(label0),
 			compExpr(expr.ThenExpr, env, false, tailp),
-			jump1Seq,
-			gen(label0),
+			jump1Prog,
+			label0,
 			compExpr(expr.ElseExpr, env, false, tailp),
-			label1Seq,
-			pushSeq,
+			label1Prog,
+			pushProg,
 		)
 	case BeginExpr:
 		body := expr.Body
-		asms := seq()
+		prog := emptyProg
 		n := len(body)
 		for i := 0; i < n-1; i++ {
-			asms = seq(
-				asms,
+			prog = GenBlock(
+				prog,
 				compExpr(body[i], env, false, NONTAIL),
 			)
 		}
-		return seq(asms, compExpr(body[n-1], env, argp, tailp))
+		return GenBlock(
+			prog,
+			compExpr(body[n-1], env, argp, tailp),
+		)
 	case JmpExpr:
 		return compExpr(expr.Expr, env, argp, JMP)
 	case FuncExpr:
 		temp := CompFuncExpr(expr, env)
-		return seq(
-			gen(NewCloseAsm(temp)),
-			genReturn(argp, tailp),
+		return GenBlock(
+			GenClose(temp),
+			leafReturnProg(argp, tailp),
 		)
 	case CallExpr:
 		label := NewLabel()
-		frameSeq := gen(NewFrameAsm(label))
-		argsSeq := gen()
-		funcSeq := compExpr(expr.FuncExpr, env, false, NONTAIL)
-		shiftSeq := gen()
-		applySeq := gen(NewApplyAsm(len(expr.ArgExprs)))
-		labelSeq := gen(label)
-		tailSeq := gen()
+		frameProg := GenFrame(label)
+		argsProg := emptyProg
+		funcProg := compExpr(expr.FuncExpr, env, false, NONTAIL)
+		shiftProg := emptyProg
+		applyProg := GenApply(len(expr.ArgExprs))
+		labelProg := Prog(label)
+		tailProg := emptyProg
 		for _, argExpr := range expr.ArgExprs {
-			argsSeq = seq(
-				argsSeq,
+			argsProg = GenBlock(
+				argsProg,
 				compExpr(argExpr, env, true, NONTAIL),
 			)
 		}
 		if tailp == JMP {
-			frameSeq = gen()
-			shiftSeq = gen(NewShiftAsm())
-			labelSeq = gen()
+			frameProg = emptyProg
+			shiftProg = GenShift()
+			labelProg = emptyProg
 		} else if tailp == TAIL {
-			tailSeq = gen(NewReturnAsm())
+			tailProg = GenReturn()
 		} else if argp {
-			tailSeq = gen(NewPushAsm())
+			tailProg = GenPush()
 		}
-		return seq(
-			frameSeq,
-			argsSeq,
-			funcSeq,
-			shiftSeq,
-			applySeq,
-			labelSeq,
-			tailSeq,
+		return GenBlock(
+			frameProg, argsProg, funcProg, shiftProg, applyProg,
+			labelProg, tailProg,
 		)
 	}
 	panic("Compile: unexpected expression")
-	return []Asm{}
+	return emptyProg
 }
 
 func Compile(expr Expr) (temp *Template, err error) {
@@ -404,4 +394,10 @@ func LinkTemplate(temp *Template, bindings map[*Symbol]Value) {
 	for i, g := range globals {
 		globals[i] = bindings[g.(*Symbol)]
 	}
+}
+
+func init() {
+	pushProg = GenPush()
+	emptyProg = GenBlock()
+	returnProg = GenReturn()
 }

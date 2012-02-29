@@ -4,23 +4,64 @@ import (
 	. "norstrulde/lumgua/machine"
 )
 
-type Asm interface {
+type Prog interface {
+	size() int
+	flatten([]asm) []asm
+}
+
+type block struct {
+	progs []Prog
+}
+
+type asm interface {
+	Prog
 	asmVariant()
 }
 
-type AsmLabel struct {
+type Label struct {
 	// Pointer identity is all that matters.
 }
 
-type AsmInstr struct {
+type asmInstr struct {
 	instr Instr
-	label *AsmLabel // May be nil.
+	label *Label // May be nil.
 }
 
-func (asm *AsmLabel) asmVariant() {}
-func (asm *AsmInstr) asmVariant() {}
+func (*Label) asmVariant() {}
+func (*asmInstr) asmVariant() {}
 
-func (asm *AsmInstr) link(labels map[*AsmLabel]int) Instr {
+func (*Label) size() int {
+	return 1
+}
+
+func (*asmInstr) size() int {
+	return 1
+}
+
+func (b *block) size() int {
+	s := 0
+	for _, sub := range b.progs {
+		s += sub.size()
+	}
+	return s
+}
+
+func (label *Label) flatten(code []asm) []asm {
+	return append(code, label)
+}
+
+func (instr *asmInstr) flatten(code []asm) []asm {
+	return append(code, instr)
+}
+
+func (b *block) flatten(code []asm) []asm {
+	for _, prog := range b.progs {
+		code = prog.flatten(code)
+	}
+	return code
+}
+
+func (asm *asmInstr) link(labels map[*Label]int) Instr {
 	pc := labels[asm.label]
 	switch InstrOp(asm.instr) {
 	case OpFrame:
@@ -33,14 +74,16 @@ func (asm *AsmInstr) link(labels map[*AsmLabel]int) Instr {
 	return asm.instr
 }
 
-func Assemble(asmCode []Asm) []Instr {
-	labels := make(map[*AsmLabel]int)
+func Assemble(prog Prog) []Instr {
+	asmCode := make([]asm, 0, prog.size())
+	asmCode = prog.flatten(asmCode)
+	labels := make(map[*Label]int)
 	i := 0
 	for _, asm := range asmCode {
 		switch asm := asm.(type) {
-		case *AsmLabel:
+		case *Label:
 			labels[asm] = i
-		case *AsmInstr:
+		case *asmInstr:
 			i++
 		}
 	}
@@ -48,7 +91,7 @@ func Assemble(asmCode []Asm) []Instr {
 	i = 0
 	for _, asm := range asmCode {
 		switch asm := asm.(type) {
-		case *AsmInstr:
+		case *asmInstr:
 			code[i] = asm.link(labels)
 			i++
 		}
@@ -56,54 +99,58 @@ func Assemble(asmCode []Asm) []Instr {
 	return code
 }
 
-func NewLabel() *AsmLabel {
-	return new(AsmLabel)
+func GenBlock(progs ...Prog) Prog {
+	return &block{progs}
 }
 
-func NewPushAsm() Asm {
-	return &AsmInstr{NewPushInstr(), nil}
+func GenConst(x Value) Prog {
+	return &asmInstr{NewConstInstr(x), nil}
 }
 
-func NewReturnAsm() Asm {
-	return &AsmInstr{NewReturnInstr(), nil}
+func GenJump(label *Label) Prog {
+	return &asmInstr{NewJumpInstr(-1), label}
 }
 
-func NewGlobalAsm(n int) Asm {
-	return &AsmInstr{NewGlobalInstr(n), nil}
+func GenPush() Prog {
+	return &asmInstr{NewPushInstr(), nil}
 }
 
-func NewConstAsm(x Value) Asm {
-	return &AsmInstr{NewConstInstr(x), nil}
+func GenFjump(label *Label) Prog {
+	return &asmInstr{NewFjumpInstr(-1), label}
 }
 
-func NewFrameAsm(label *AsmLabel) Asm {
-	return &AsmInstr{NewFrameInstr(-1), label}
+func GenClose(temp *Template) Prog {
+	return &asmInstr{NewCloseInstr(temp), nil}
 }
 
-func NewShiftAsm() Asm {
-	return &AsmInstr{NewShiftInstr(), nil}
+func GenFrame(label *Label) Prog {
+	return &asmInstr{NewFrameInstr(-1), label}
 }
 
-func NewApplyAsm(nargs int) Asm {
-	return &AsmInstr{NewApplyInstr(nargs), nil}
+func GenApply(nargs int) Prog {
+	return &asmInstr{NewApplyInstr(nargs), nil}
 }
 
-func NewJumpAsm(label *AsmLabel) Asm {
-	return &AsmInstr{NewJumpInstr(-1), label}
+func GenShift() Prog {
+	return &asmInstr{NewShiftInstr(), nil}
 }
 
-func NewFjumpAsm(label *AsmLabel) Asm {
-	return &AsmInstr{NewFjumpInstr(-1), label}
+func GenReturn() Prog {
+	return &asmInstr{NewReturnInstr(), nil}
 }
 
-func NewCloseAsm(temp *Template) Asm {
-	return &AsmInstr{NewCloseInstr(temp), nil}
+func GenLocal(n int) Prog {
+	return &asmInstr{NewLocalInstr(n), nil}
 }
 
-func NewLocalAsm(i int) Asm {
-	return &AsmInstr{NewLocalInstr(i), nil}
+func GenFree(n int) Prog {
+	return &asmInstr{NewFreeInstr(n), nil}
 }
 
-func NewFreeAsm(i int) Asm {
-	return &AsmInstr{NewFreeInstr(i), nil}
+func GenGlobal(n int) Prog {
+	return &asmInstr{NewGlobalInstr(n), nil}
+}
+
+func NewLabel() *Label {
+	return new(Label)
 }
