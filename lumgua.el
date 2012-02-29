@@ -38,3 +38,9 @@
     (save-excursion
       (backward-sexp)
       (lumgua-eval-region (point) end))))
+
+(defun lumgua-indent-defun ()
+  (interactive)
+  (save-excursion
+    (mark-defun)
+    (indent-region (point) (mark))))
