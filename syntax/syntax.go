@@ -448,6 +448,7 @@ func ParseExpr(lit Literal) Expr {
 		}
 		return QuoteExpr{LiteralValue(x.at(1))}
 	}
+/*
 	if head == Intern("if") {
 		if x.len() != 4 {
 			panic("ParseExpr: ill-formed if")
@@ -458,6 +459,7 @@ func ParseExpr(lit Literal) Expr {
 			ParseExpr(x.at(3)),
 		}
 	}
+*/
 	if head == Intern("begin") {
 		if x.len() < 2 {
 			panic("ParseExpr: ill-formed begin")
@@ -510,9 +512,9 @@ func ParseExpr(lit Literal) Expr {
 		}
 		panic("ParseExpr: ill-formed define")
 	}
-	if head == Intern("cond") {
+	if head == Intern("if") {
 		if x.len() < 2 {
-			panic("ParseExpr: ill-formed cond")
+			panic("ParseExpr: ill-formed if")
 		}
 		clauses := make([]CondClause, x.len()-1)
 		for i, item := range x.items[1:] {
