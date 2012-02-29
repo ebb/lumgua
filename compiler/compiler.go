@@ -264,18 +264,13 @@ func compExpr(expr Expr, env *CompEnv, argp bool, tailp int) Prog {
 		)
 	case BeginExpr:
 		body := expr.Body
-		prog := emptyProg
 		n := len(body)
-		for i := 0; i < n-1; i++ {
-			prog = GenBlock(
-				prog,
-				compExpr(body[i], env, false, NONTAIL),
-			)
+		progs := make([]Prog, n)
+		for i, expr := range body[:n-1] {
+			progs[i] = compExpr(expr, env, false, NONTAIL)
 		}
-		return GenBlock(
-			prog,
-			compExpr(body[n-1], env, argp, tailp),
-		)
+		progs[n-1] = compExpr(body[n-1], env, argp, tailp)
+		return GenBlock(progs...)
 	case JmpExpr:
 		return compExpr(expr.Expr, env, argp, JMP)
 	case FuncExpr:
