@@ -269,9 +269,7 @@ type frameInstr struct {
 }
 
 func (instr *frameInstr) Exec(m *Machine) {
-	m.stack = append(m.stack, m.f)
-	m.stack = append(m.stack, m.fp)
-	m.stack = append(m.stack, instr.pc)
+	m.rstack = append(m.rstack, Return{m.f, m.fp, instr.pc})
 }
 
 func NewFrameInstr(pc int) Instr {
@@ -395,11 +393,11 @@ func (instr *applyInstr) Sexp() Value {
 type returnInstr struct{}
 
 func (*returnInstr) Exec(m *Machine) {
-	fp := m.fp
-	m.pc = m.stack[fp-1].(int)
-	m.fp = m.stack[fp-2].(int)
-	m.f =  m.stack[fp-3].(*Func)
-	m.stack = m.stack[:fp-3]
+	ret := m.rstack[len(m.rstack)-1]
+	m.rstack = m.rstack[:len(m.rstack)-1]
+	m.f = ret.f
+	m.fp = ret.fp
+	m.pc = ret.pc
 	m.code = m.f.Temp.Code
 	m.env = m.f.Env
 }
@@ -587,11 +585,18 @@ func NewPrimTemplate(name string, nargs int, prim Prim) *Template {
 var ApplyFunc *Func
 var CallccFunc *Func
 
+type Return struct {
+	f  *Func
+	fp int
+	pc int
+}
+
 type Machine struct {
 	status int
 	f      *Func
 	fp     int
 	pc     int
+	rstack []Return
 	stack  []Value
 	a      Value
 	code   []Instr
@@ -611,9 +616,9 @@ func (m *Machine) throw(s string) {
 	}
 }
 
-func freshStack() []Value {
-	s := make([]Value, 3)
-	s[0] = NewFunc(
+func freshRstack() []Return {
+	s := make([]Return, 1)
+	s[0].f = NewFunc(
 		NewTemplate(
 			"halt", 0, nil,
 			[]Instr{
@@ -624,15 +629,15 @@ func freshStack() []Value {
 		),
 		nil,
 	)
-	s[1] = 0
-	s[2] = 0
+	s[0].fp = 0
+	s[0].pc = 0
 	return s
 }
 
 func NewMachine(f *Func) *Machine {
 	return &Machine{
 		stateRunning, f, 3, 0,
-		freshStack(), EmptyList,
+		freshRstack(), []Value{}, EmptyList,
 		f.Temp.Code, f.Env,
 	}
 }
