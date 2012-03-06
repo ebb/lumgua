@@ -80,7 +80,7 @@ type Func struct {
 }
 
 type Cont struct {
-	Stack Stack
+	Stack []Value
 }
 
 type Cell struct {
@@ -106,7 +106,7 @@ func NewFunc(temp *Template, env []Value) *Func {
 	}
 }
 
-func NewCont(stack Stack) *Cont {
+func NewCont(stack []Value) *Cont {
 	return &Cont{stack}
 }
 
@@ -587,14 +587,12 @@ func NewPrimTemplate(name string, nargs int, prim Prim) *Template {
 var ApplyFunc *Func
 var CallccFunc *Func
 
-type Stack []Value
-
 type Machine struct {
 	status int
 	f      *Func
 	fp     int
 	pc     int
-	stack  Stack
+	stack  []Value
 	a      Value
 	code   []Instr
 	env    []Value
@@ -613,7 +611,7 @@ func (m *Machine) throw(s string) {
 	}
 }
 
-func freshStack() Stack {
+func freshStack() []Value {
 	s := make([]Value, 3)
 	s[0] = NewFunc(
 		NewTemplate(
