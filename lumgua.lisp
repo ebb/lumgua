@@ -45,11 +45,9 @@
 	    (for (+ i 1) n f)))))
 
 (define (foreach f x)
-  (foldl (func (ignore elt)
-	   (f elt)
-	   '())
-	 '()
-	 x))
+  (jmp (if ((not (nilp x))
+	    (f (car x))
+	    (foreach f (cdr x))))))
 
 (define (map f x)
   (foldr (func (elt z)
