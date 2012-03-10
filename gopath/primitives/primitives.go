@@ -57,9 +57,6 @@ func primSymbolName(args ...Value) (Value, error) {
 }
 
 func primCons(args ...Value) (Value, error) {
-	if len(args) != 2 {
-		return nil, errors.New("cons: wrong number of arguments")
-	}
 	tail, ok := args[1].(*List)
 	if !ok {
 		return nil, errors.New("cons: type error")
@@ -161,16 +158,7 @@ func primContOpen(args ...Value) (Value, error) {
 	if !ok {
 		return nil, errors.New("contopen: type error")
 	}
-	a := make([]Value, len(c.Stack))
-	copy(a, c.Stack)
-	stack := NewArray(a)
-	n := len(stack)
-	for i := 0; i < n; i++ {
-		if n, ok := stack[i].(int); ok {
-			stack[i] = Number(n)
-		}
-	}
-	return NewList(Intern("cont"), stack), nil
+	return c.Reify(), nil
 }
 
 func primArrayNew(args ...Value) (Value, error) {
@@ -539,9 +527,6 @@ func primExec(args ...Value) (Value, error) {
 	var s String
 	var ok bool
 	var err error
-	if len(args) != 2 {
-		return nil, errors.New("exec: wrong number of arguments")
-	}
 	s, ok = args[0].(String)
 	if !ok {
 		return nil, errors.New("exec: bad program name")
@@ -573,17 +558,11 @@ func primExec(args ...Value) (Value, error) {
 }
 
 func primExit(args ...Value) (Value, error) {
-	if len(args) != 1 {
-		return nil, errors.New("exit: bad argument list")
-	}
 	os.Exit(int(args[0].(Number)))
 	return nil, errors.New("exit: failed to exit!")
 }
 
 func primReadAll(args ...Value) (val Value, err error) {
-	if len(args) != 1 {
-		return nil, errors.New("readall: bad argument list")
-	}
 	defer func() {
 		x := recover()
 		if x == nil {
@@ -608,9 +587,6 @@ func primReadAll(args ...Value) (val Value, err error) {
 }
 
 func primCompile(args ...Value) (val Value, err error) {
-	if len(args) != 1 {
-		return nil, errors.New("compile: wrong number of arguments")
-	}
 	defer func() {
 		x := recover()
 		if x == nil {

@@ -80,7 +80,8 @@ type Func struct {
 }
 
 type Cont struct {
-	Stack []Value
+	Rstack []Return
+	Stack  []Value
 }
 
 type Cell struct {
@@ -106,8 +107,8 @@ func NewFunc(temp *Template, env []Value) *Func {
 	}
 }
 
-func NewCont(stack []Value) *Cont {
-	return &Cont{stack}
+func NewCont(rstack []Return, stack []Value) *Cont {
+	return &Cont{rstack, stack}
 }
 
 func NewCell(x Value) *Cell {
@@ -214,10 +215,11 @@ func InstrOp(instr Instr) int {
 type continuationInstr struct{}
 
 func (*continuationInstr) Exec(m *Machine) {
-	n := len(m.stack)-1
-	s := make([]Value, n)
-	copy(s, m.stack[:n])
-	m.a = NewCont(s)
+	r := make([]Return, len(m.rstack))
+	s := make([]Value, len(m.stack))
+	copy(r, m.rstack)
+	copy(s, m.stack)
+	m.a = NewCont(r, s)
 }
 
 func NewContinuationInstr() Instr {
@@ -289,7 +291,7 @@ func (*shiftInstr) Exec(m *Machine) {
 		m.stack[i] = m.stack[i+nremove]
 		i++
 	}
-	m.stack = m.stack[0:len(m.stack)-nremove]
+	m.stack = m.stack[:len(m.stack)-nremove]
 }
 
 func NewShiftInstr() Instr {
@@ -353,17 +355,11 @@ func (m *Machine) applyFunc(f *Func, nargs int) {
 }
 
 func (m *Machine) applyCont(c *Cont) {
-	ret := returnInstr{}
 	m.a = m.stack[len(m.stack)-1]
-	n := len(c.Stack)
-	if n <= cap(m.stack) {
-		m.stack = m.stack[:n]
-	} else {
-		m.stack = make([]Value, n)
-	}
-	copy(m.stack, c.Stack)
-	m.fp = n
-	ret.Exec(m)
+	m.rstack = append(m.rstack[:0], c.Rstack...)
+	m.stack = append(m.stack[:0], c.Stack...)
+	m.f = CallccFunc
+	new(returnInstr).Exec(m)
 }
 
 func (instr *applyInstr) Exec(m *Machine) {
@@ -393,6 +389,7 @@ func (instr *applyInstr) Sexp() Value {
 type returnInstr struct{}
 
 func (*returnInstr) Exec(m *Machine) {
+	m.stack = m.stack[:len(m.stack)-m.f.Temp.Nvars]
 	ret := m.rstack[len(m.rstack)-1]
 	m.rstack = m.rstack[:len(m.rstack)-1]
 	m.f = ret.f
@@ -563,10 +560,6 @@ func (instr *primInstr) Exec(m *Machine) {
 	m.a = a
 }
 
-func NewPrimInstr(name string, prim Prim) Instr {
-	return &primInstr{name, prim}
-}
-
 func (instr *primInstr) Sexp() Value {
 	return NewList(Intern("prim"), Intern(instr.name))
 }
@@ -601,6 +594,19 @@ type Machine struct {
 	a      Value
 	code   []Instr
 	env    []Value
+}
+
+func (c *Cont) Reify() Value {
+	stack := make([]Value, len(c.Stack))
+	copy(stack, c.Stack)
+	rstack := make([]Value, len(c.Rstack))
+	for i := 0; i < len(c.Rstack); i++ {
+		ret := c.Rstack[i]
+		rstack[i] = NewList(Intern("return"),
+			ret.f, Number(ret.fp), Number(ret.pc),
+		)
+	}
+	return NewList(Intern("cont"), NewArray(rstack), NewArray(stack))
 }
 
 func (m *Machine) throw(s string) {

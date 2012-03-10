@@ -153,17 +153,16 @@
 	  (strextend s ")")
 	  (log (cellget s))))))))
 
-(define (showbacktraceloop stack fp)
-  (jmp (if ((!= fp 0)
-	    (let ((f (arrayget stack (- fp 3)))
-		  (fp (arrayget stack (- fp 2))))
-	      (showoneframe stack f fp)
-	      (showbacktraceloop stack fp))))))
-
 (define (showbacktrace c)
   (match (contopen c)
-    ((cont stack)
-     (showbacktraceloop stack (arraylength stack)))))
+    ((cont rstack stack)
+     (let ((n (arraylength rstack)))
+       (for 1 n
+	    (func (i)
+	      (let ((j (- n i)))
+		(match (arrayget rstack j)
+		  ((return f fp pc)
+		   (showoneframe stack f fp))))))))))
 
 (define (time f)
   (- 0 (- (now)
