@@ -1,6 +1,7 @@
 ;; (put 'func 'lisp-indent-function 1)
 ;; (put 'match 'lisp-indent-function 1)
 ;; (put 'if 'lisp-indent-function 0)
+;; (put 'begin 'lisp-indent-function 0)
 
 (defun lumgua-compile-file ()
   (interactive)
