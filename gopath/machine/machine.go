@@ -596,7 +596,7 @@ type Machine struct {
 	env    []Value
 }
 
-func (c *Cont) Reify() Value {
+func (c *Cont) Open() Value {
 	stack := make([]Value, len(c.Stack))
 	copy(stack, c.Stack)
 	rstack := make([]Value, len(c.Rstack))

@@ -158,7 +158,7 @@ func primContOpen(args ...Value) (Value, error) {
 	if !ok {
 		return nil, errors.New("contopen: type error")
 	}
-	return c.Reify(), nil
+	return c.Open(), nil
 }
 
 func primArrayNew(args ...Value) (Value, error) {
