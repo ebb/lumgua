@@ -10,9 +10,20 @@ Getting Started
 
 Try the following:
 
-  $ export GOPATH=$GOPATH:$PWD/go
-  $ bash refresh.bash
-  $ ./lumgua lumgua
+  (Note: The server must be running before you try running lumgua code.)
+
+  term1
+    $ export GOPATH=$GOPATH:$PWD/go
+    $ bash refresh.bash
+    <edit and refresh loop>
+
+  term2
+    $ ./server
+    <restart as necessary>
+
+  term3
+    $ ./lumgua lumgua
+    <edit lumgua.lisp and try again>
 
 
 The Language
