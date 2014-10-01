@@ -238,7 +238,10 @@
 		 ((close template)
 		  (showtemplate template (cdr nesting))))))))))
 
-(define main repl)
+;(define main repl)
+
+(define (main)
+  (log "Not dead yet."))
 
 ; some tests
 ;

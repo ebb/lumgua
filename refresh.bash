@@ -1,4 +1,4 @@
-rsync -a --delete gopath/* $HOME/support/gopath/src/norstrulde/lumgua
-go install norstrulde/lumgua
+go install norstrulde/lumgua || exit 1
+cp go/bin/lumgua . || exit 1
 
-make -s lispin server
+make -s lispin server || exit 1

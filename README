@@ -1,32 +1,18 @@
 Lumgua is a simple programming language.  Sample code:
 
-  (define compile
-    (func (exp)
-      (assemble
-       (match (first (comp `(func () ,(macroexpandall exp))
-			   '(env nil nil)
-			   nil nil))
-	 ((close template)
-	  template)))))
+(define (foldl f z x)
+  (jmp (if ((nilp x) z)
+           (else
+            (foldl f (f z (car x)) (cdr x))))))
 
 
 Getting Started
 
 Try the following:
 
-  term1:
-    $ bash lumgua.bash
-    entering REPL
-
-  term2:
-    $ echo '(log "hello world")' | ./lispin
-    $ ./lispin
-    (log "hello again")
-    ^D
-    $ emacs # see below
-
-If you load lumgua.el into an emacs buffer, you can use C-c C-e to
-send the expression before point to a running Lumgua process.
+  $ export GOPATH=$GOPATH:$PWD/go
+  $ bash refresh.bash
+  $ ./lumgua lumgua
 
 
 The Language
@@ -63,7 +49,6 @@ The Implementation
 
 The implementation has a few useful features beyond mere evaluation:
 
-  * Interaction with emacs.
   * Reasonably useful stack traces.
   * Disassembly of functions.
 
