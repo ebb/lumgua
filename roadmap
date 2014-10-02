@@ -1,31 +1,86 @@
 Roadmap
 
-Here's a list of work underway or under consideration:
 
- Debootstrapping:
+Get the REPL and disassembler working again.
 
-  - Translate the reader to Go using goyacc.
-  - Translate the compiler to Go.
-  - Remove all FASL files from the repo.
-  - Consider using the gob format for FASL files.
+  I think the project has suffered some bitrot. The REPL doesn't even come up
+  properly at this point!
 
- Expressiveness:
+Revisit the syntax.
 
-  - Package system.
-  - Concurrency.
-  - Local mutual recursion.
-  - Delimited continuations.
-  - Dynamic scope.
-  - Better error-handling mechanisms.
+  I have some syntax experiments in mind. There is an idea for very
+  conservative infix operators that don't interfere with the natural shape of
+  Lisp syntax, a goal of more-uniform indentation, and an idea concerning the
+  use of capitalization to separate namespaces.
 
- Pragmatics:
+Distinguish functions from procedures.
 
-  - Debugger improvements.
-  - System libraries for Linux.
+  I was a Fortran programmer for a while and I liked the syntactic distinction
+  between subroutines and functions. I've also used Haskell and I like that you
+  can easily tell when a function just calculates a value and when there is
+  more going on behind the scenes. There is no type system to use here but I'm
+  planning to use syntax and dynamic checks to help isolate effects. The result
+  will be significantly different from both Fortran and Haskell but have a
+  similar flavour. I'll also provide a way to use benign effects within a pure
+  function.
 
- Optimization:
+Concurrency.
 
-  - Inline ((func ...) ...) and (apply (func ...) ...).
-  - Maybe coalesce common instruction sequences for less dispatching.
-  - Inline calls to statically-known primitives.
-  - Optimize calls to statically-known functions.
+  I like Go's channels but I'm more familiar with implementing the Erlang
+  message-passing model so I'll aim to implement that here. Once we have
+  independent processes, a lot of questions arise about shared memory, garbage
+  collection, locks, atomic ops, etc so I'll have to consider all those things.
+  Concurrency and failure management make for a much nicer interactive
+  environment; that's the primary motivation.
+
+Sums and products.
+
+  Again, lumgua has a trivial type system but I see no reason it can't use data
+  constructors similar to what you find in ML and Haskell.
+  
+Better mutable objects.
+
+  I'm considering adding a struct constructor--a struct is just a product with
+  mutable fields. Also, it might be nice to have packed structs and arrays for
+  better cache utilization. The memory layout could be specified at
+  construction time and thereafter we can just convert to and from generic
+  objects during load and store operations.
+
+Hidden classes (in the V8 sense).
+
+  Hidden classes just seem like a sensible way to optimize storage and access
+  for product and struct objects.
+
+Tighten up memory usage in the runtime.
+
+  The stack layout and instruction format could be a lot more efficient. I'd
+  also consider revisiting the way lumgua objects are stored.
+
+Dynamic classification.
+
+  Abstract types are nice to have sometimes. I think that dynamic
+  classification, where you can create fresh class objects that can be used to
+  pack and unpack representations, is a nice feature for a language like lumgua
+  that has no type-level sophistication.
+
+Register machine interpreter.
+
+  Will a register machine be faster than a stack machine for this language?
+  It's something I'd like to experiment with.
+
+Inlining, contification, deforestation, and other optimizations.
+
+  Maybe someday lumgua will have an optimizing compiler. That'd be nice.
+
+Libraries
+
+  I'd like to use lumgua for prototyping simple applications for my Arch Linux
+  desktop machine and perhaps for my Beaglebone Black. At a minimum, that will
+  require input device events and a drawing library. There should also be
+  access to the core Unix system calls.
+
+Modularity
+
+  It doesn't take long to start getting collisions in the global namespace. I
+  haven't thought much about modularity yet but it's something that will become
+  necessary if the project starts to grow.
