@@ -1,11 +1,6 @@
 Roadmap
 
 
-Get the REPL and disassembler working again.
-
-  I think the project has suffered some bitrot. The REPL doesn't even come up
-  properly at this point!
-
 Revisit the syntax.
 
   I have some syntax experiments in mind. There is an idea for very
