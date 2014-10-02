@@ -19,7 +19,8 @@ type asm interface {
 }
 
 type Label struct {
-	// Pointer identity is all that matters.
+	// Pointer identity is all that matters. The struct MUST NOT be empty.
+	bool
 }
 
 type asmInstr struct {

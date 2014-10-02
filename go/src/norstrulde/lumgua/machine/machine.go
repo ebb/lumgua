@@ -2,6 +2,7 @@ package machine
 
 import (
 	"errors"
+	"fmt"
 )
 
 var symbolTable map[string]*Symbol
@@ -687,4 +688,39 @@ func init() {
 		),
 		nil,
 	)
+}
+
+func printSexp(x Value) {
+	// TODO Add cases as needed.
+	switch x := x.(type) {
+	case *List:
+		fmt.Print("(")
+		if x != EmptyList {
+			printSexp(x.Head)
+			x = x.Tail
+		}
+		for x != EmptyList {
+			fmt.Print(" ")
+			printSexp(x.Head)
+			x = x.Tail
+		}
+		fmt.Print(")")
+	case *Symbol:
+		fmt.Printf("%s", x.Name)
+	case Number:
+		fmt.Printf("%g", x)
+	case String:
+		fmt.Printf("\"%s\"", x)
+	default:
+		fmt.Print("?")
+	}
+}
+
+func disassemble(f *Func) {
+	fmt.Println(f.Temp.Name)
+	for _, instr := range f.Temp.Code {
+		fmt.Print("\t")
+		printSexp(instr.Sexp())
+		fmt.Println()
+	}
 }
