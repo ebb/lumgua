@@ -467,11 +467,11 @@ func ParseExpr(lit Literal) Expr {
 		body := parseEach(x.items[1:])
 		return BeginExpr{body}
 	}
-	if head == Intern("jmp") {
+	if head == Intern("goto") {
 		if x.len() != 2 {
-			panic("ParseExpr: ill-formed jmp")
+			panic("ParseExpr: ill-formed goto")
 		}
-		return JmpExpr{ParseExpr(x.at(1))}
+		return GotoExpr{ParseExpr(x.at(1))}
 	}
 	if head == Intern("func") {
 		if x.len() < 3 {
@@ -580,7 +580,7 @@ type BeginExpr struct {
 	Body []Expr
 }
 
-type JmpExpr struct {
+type GotoExpr struct {
 	Expr Expr
 }
 
@@ -662,7 +662,7 @@ func (_ RefExpr) exprVariant()       {}
 func (_ QuoteExpr) exprVariant()     {}
 func (_ IfExpr) exprVariant()        {}
 func (_ BeginExpr) exprVariant()     {}
-func (_ JmpExpr) exprVariant()       {}
+func (_ GotoExpr) exprVariant()      {}
 func (_ FuncExpr) exprVariant()      {}
 func (_ CallExpr) exprVariant()      {}
 

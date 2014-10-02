@@ -22,10 +22,9 @@
     (f b a)))
 
 (define (foldl f z x)
-  (jmp (if ((nilp x) z)
-	   (else
-	    (foldl f (f z (car x))
-		   (cdr x))))))
+  (if ((nilp x) z)
+      (else
+	(goto (foldl f (f z (car x)) (cdr x))))))
 
 (define (foldr f z x)
   (foldl (flip f) z (reverse x)))
@@ -37,17 +36,18 @@
 	 x))
 
 (define (loop f)
-  (jmp (begin (f) (loop f))))
+  (f)
+  (goto (loop f)))
 
 (define (for i n f)
-  (jmp (if ((< i n)
-	    (f i)
-	    (for (+ i 1) n f)))))
+  (if ((< i n)
+       (f i)
+       (goto (for (+ i 1) n f)))))
 
 (define (foreach f x)
-  (jmp (if ((not (nilp x))
-	    (f (car x))
-	    (foreach f (cdr x))))))
+  (if ((not (nilp x))
+       (f (car x))
+       (goto (foreach f (cdr x))))))
 
 (define (map f x)
   (foldr (func (elt z)
@@ -93,8 +93,8 @@
   (third (cdr x)))
 
 (define (nth n x)
-  (jmp (if ((= n 0) (car x))
-	   (else (nth (- n 1) (cdr x))))))
+  (if ((= n 0) (car x))
+      (else (goto (nth (- n 1) (cdr x))))))
 
 (define (strextend cell str)
   (cellput cell (strcat &((cellget cell) str))))
@@ -199,9 +199,9 @@
 		       exps))))))
 
 (define (detect pred x)
-  (jmp (if ((nilp x) F)
-	   ((pred (car x)) T)
-	   (else (detect pred (cdr x))))))
+  (if ((nilp x) F)
+      ((pred (car x)) T)
+      (else (goto (detect pred (cdr x))))))
 
 (define (member x s)
   (detect (func (y) (= x y)) s))
@@ -221,22 +221,22 @@
      (showtemplate temp nesting))))
 
 (define (showtemplate template nesting)
-  (jmp (match (templateopen template)
-	 ((template name nvars freerefs code)
-	  (if ((= nesting '())
-	       (log (strcat &("name: " name)))
-	       (log (strcat &("nvars: " (write nvars))))
-	       (log (strcat &("freerefs: " (write freerefs))))
-	       (foldl (func (pc instr)
-			(showinstr pc instr)
-			(+ pc 1))
-		      0
-		      code)
-	       'end)
-	      (else
-	       (match (nth (car nesting) code)
-		 ((close template)
-		  (showtemplate template (cdr nesting))))))))))
+  (match (templateopen template)
+    ((template name nvars freerefs code)
+     (if ((= nesting '())
+	  (log (strcat &("name: " name)))
+	  (log (strcat &("nvars: " (write nvars))))
+	  (log (strcat &("freerefs: " (write freerefs))))
+	  (foldl (func (pc instr)
+		   (showinstr pc instr)
+		   (+ pc 1))
+	         0
+	         code)
+          'end)
+	 (else
+	  (match (nth (car nesting) code)
+	    ((close template)
+	     (goto (showtemplate template (cdr nesting))))))))))
 
 (define main repl)
 

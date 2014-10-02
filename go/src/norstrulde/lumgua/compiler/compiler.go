@@ -17,7 +17,7 @@ var returnProg Prog
 const (
 	NONTAIL = iota
 	TAIL
-	JMP
+	GOTO
 )
 
 type CompEnv struct {
@@ -121,7 +121,7 @@ func findFree(expr Expr, b, p *SymbolSet) *SymbolSet {
 		refs = refs.Union(findFree(expr.ElseExpr, b, p))
 	case BeginExpr:
 		refs = collectFree(expr.Body, b, p)
-	case JmpExpr:
+	case GotoExpr:
 		refs = findFree(expr.Expr, b, p)
 	case FuncExpr:
 		refs = collectFree(expr.Body, b, NewSymbolSet(expr.Params))
@@ -160,7 +160,7 @@ func findGlobals(globals map[*Symbol]int, nonglobals *SymbolSet, expr Expr) {
 		findGlobals(globals, nonglobals, expr.ElseExpr)
 	case BeginExpr:
 		collectGlobals(globals, nonglobals, expr.Body)
-	case JmpExpr:
+	case GotoExpr:
 		findGlobals(globals, nonglobals, expr.Expr)
 	case CallExpr:
 		findGlobals(globals, nonglobals, expr.FuncExpr)
@@ -271,8 +271,8 @@ func compExpr(expr Expr, env *CompEnv, argp bool, tailp int) Prog {
 		}
 		progs[n-1] = compExpr(body[n-1], env, argp, tailp)
 		return GenBlock(progs...)
-	case JmpExpr:
-		return compExpr(expr.Expr, env, argp, JMP)
+	case GotoExpr:
+		return compExpr(expr.Expr, env, argp, GOTO)
 	case FuncExpr:
 		temp := CompFuncExpr(expr, env)
 		return GenBlock(
@@ -294,7 +294,7 @@ func compExpr(expr Expr, env *CompEnv, argp bool, tailp int) Prog {
 				compExpr(argExpr, env, true, NONTAIL),
 			)
 		}
-		if tailp == JMP {
+		if tailp == GOTO {
 			frameProg = emptyProg
 			shiftProg = GenShift()
 			labelProg = emptyProg
@@ -359,8 +359,8 @@ func Macroexpandall(expr Expr) Expr {
 			body[i] = Macroexpandall(subexpr)
 		}
 		return BeginExpr{body}
-	case JmpExpr:
-		return JmpExpr{Macroexpandall(core.Expr)}
+	case GotoExpr:
+		return GotoExpr{Macroexpandall(core.Expr)}
 	case FuncExpr:
 		body := make([]Expr, len(core.Body))
 		for i, subexpr := range core.Body {
