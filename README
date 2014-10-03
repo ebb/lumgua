@@ -11,12 +11,19 @@ Getting Started
 
 Try the following:
 
-  (Note: The server must be running before you try running lumgua code.)
+  (Note: The server must be running before you try running lumgua code. The
+  REPL is designed to receive code over HTTP via the server.)
 
   term1
     $ export GOPATH=$GOPATH:$PWD/go
     $ bash refresh.bash
-    <edit and refresh loop>
+    <go to term3 and start lumgua>
+    $ echo '(+ 1 1)' | ./lispin
+    $ ./lispin
+    (log "hello")
+    (log "world")
+    ^D
+    <and so on>
 
   term2
     $ ./server
