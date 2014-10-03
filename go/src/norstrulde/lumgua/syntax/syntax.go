@@ -301,17 +301,17 @@ func parseCondClause(form Literal) CondClause {
 	}
 	list, ok := form.(*ListLiteral)
 	if !ok {
-		fail()
+		return fail()
 	}
 	items := list.items
 	head, ok := items[0].(*Symbol)
 	if !ok {
-		fail()
+		return fail()
 	}
 	switch head.Name {
 	case "case":
 		if len(items) < 3 {
-			fail()
+			return fail()
 		}
 		return CondClause{
 			ParseExpr(items[1]),
@@ -319,7 +319,7 @@ func parseCondClause(form Literal) CondClause {
 		}
 	case "else":
 		if len(items) < 2 {
-			fail()
+			return fail()
 		}
 		return CondClause{
 			QuoteExpr{Bool(true)},
@@ -382,36 +382,56 @@ func expandQuasi(lit Literal) Literal {
 }
 
 func parseMatchClause(lit Literal) MatchClause {
-	var clause MatchClause
-	x, ok := lit.(*ListLiteral)
-	if !ok || x.len() < 2 {
+	fail := func() MatchClause {
 		panic("ParseExpr: ill-formed match clause")
 	}
-	sym, ok := x.head().(*Symbol)
-	if ok && sym == Intern("else") {
-		// TODO - this is awkward
-		clause.tag = sym
-		clause.params = []*Symbol{}
-		clause.body = parseEach(x.items[1:])
-		return clause
-	}
-	pattern, ok := x.head().(*ListLiteral)
-	if !ok || pattern.len() == 0 {
-		panic("ParseExpr: ill-formed match clause")
-	}
-	clause.tag, ok = pattern.head().(*Symbol)
+	list, ok := lit.(*ListLiteral)
 	if !ok {
-		panic("ParseExpr: ill-formed match clause")
+		return fail()
 	}
-	clause.params = make([]*Symbol, pattern.len()-1)
-	for i, item := range pattern.items[1:] {
-		clause.params[i], ok = item.(*Symbol)
-		if !ok {
-			panic("ParseExpr: ill-formed match clause")
+	items := list.items
+	head, ok := items[0].(*Symbol)
+	if !ok {
+		return fail()
+	}
+	switch head.Name {
+	case "case":
+		if len(items) < 3 {
+			return fail()
 		}
+		pattern, ok := items[1].(*ListLiteral)
+		if !ok || pattern.len() == 0 {
+			return fail()
+		}
+		tag, ok := pattern.head().(*Symbol)
+		if !ok {
+			return fail()
+		}
+		params := make([]*Symbol, pattern.len()-1)
+		for i, item := range pattern.items[1:] {
+			params[i], ok = item.(*Symbol)
+			if !ok {
+				return fail()
+			}
+		}
+		body := parseEach(items[2:])
+		return MatchClause{
+			tag: tag,
+			params: params,
+			body: body,
+		}
+	case "else":
+		if len(items) < 2 {
+			return fail()
+		}
+		return MatchClause{
+			tag: head,
+			params: []*Symbol{},
+			body: parseEach(items[1:]),
+		}
+	default:
+		return fail()
 	}
-	clause.body = parseEach(x.items[1:])
-	return clause
 }
 
 func ParseExpr(lit Literal) Expr {
