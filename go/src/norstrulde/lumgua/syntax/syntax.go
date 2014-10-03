@@ -405,140 +405,118 @@ func ParseExpr(lit Literal) Expr {
 		return QuoteExpr{x}
 	case *Symbol:
 		return RefExpr{x}
+	case *ListLiteral:
+		break
+	default:
+		panic("ParseExpr: unexpected expression type")
 	}
-	x, ok := lit.(*ListLiteral)
-	if !ok {
-		panic("ParseExpr: nonliteral")
-	}
-	if x.len() == 0 {
+	items := lit.(*ListLiteral).items
+	if len(items) == 0 {
 		panic("ParseExpr: empty expression")
 	}
-	head, ok := x.head().(*Symbol)
+	head, ok := items[0].(*Symbol)
 	if !ok {
 		panic("ParseExpr: compound form does not start with a symbol")
 	}
-	if head == Intern("quasiquote") {
-		if x.len() != 2 {
-			panic("ParseExpr: ill-formed quasiquote")
-		}
-		return ParseExpr(expandQuasi(x.at(1)))
+	fixedArities := map[string]int{
+		"quasiquote": 1,
+		"ampersand": 1,
+		"quote": 1,
+		"goto": 1,
 	}
-	if head == Intern("ampersand") {
-		if x.len() != 2 {
-			panic("ParseExpr: ill-formed ampersand")
+	arityMins := map[string]int{
+		"begin": 2,
+		"func": 3,
+		"let": 3,
+		"define": 3,
+		"if": 2,
+		"match": 3,
+		"call": 2,
+	}
+	if arity, ok := fixedArities[head.Name]; ok {
+		if len(items) != arity+1 {
+			panic("ParseExpr: ill-formed " + head.Name + " form")
 		}
-		list, ok := x.at(1).(*ListLiteral)
+	}
+	if min, ok := arityMins[head.Name]; ok {
+		if len(items) < min {
+			panic("ParseExpr: ill-formed " + head.Name + " form")
+		}
+	}
+	switch head.Name {
+	case "quasiquote":
+		return ParseExpr(expandQuasi(items[1]))
+	case "ampersand":
+		list, ok := items[1].(*ListLiteral)
 		if !ok {
 			panic("ParseExpr: ill-formed ampersand")
 		}
 		return AmpersandExpr{parseEach(list.items)}
-	}
-	if head == Intern("quote") {
-		if x.len() != 2 {
-			panic("ParseExpr: ill-formed quote")
-		}
-		return QuoteExpr{LiteralValue(x.at(1))}
-	}
+	case "quote":
+		return QuoteExpr{LiteralValue(items[1])}
 /*
 	if head == Intern("if") {
-		if x.len() != 4 {
-			panic("ParseExpr: ill-formed if")
-		}
 		return IfExpr{
-			ParseExpr(x.at(1)),
-			ParseExpr(x.at(2)),
-			ParseExpr(x.at(3)),
+			ParseExpr(items[1]),
+			ParseExpr(items[2]),
+			ParseExpr(items[3]),
 		}
 	}
 */
-	if head == Intern("begin") {
-		if x.len() < 2 {
-			panic("ParseExpr: ill-formed begin")
-		}
-		body := parseEach(x.items[1:])
+	case "begin":
+		body := parseEach(items[1:])
 		return BeginExpr{body}
-	}
-	if head == Intern("goto") {
-		if x.len() != 2 {
-			panic("ParseExpr: ill-formed goto")
-		}
-		return GotoExpr{ParseExpr(x.at(1))}
-	}
-	if head == Intern("func") {
-		if x.len() < 3 {
-			panic("ParseExpr: ill-formed func")
-		}
-		params := parseParams(x.at(1))
-		body := parseEach(x.items[2:])
+	case "goto":
+		return GotoExpr{ParseExpr(items[1])}
+	case "func":
+		params := parseParams(items[1])
+		body := parseEach(items[2:])
 		return FuncExpr{params, body}
-	}
-	if head == Intern("let") {
-		if x.len() < 3 {
-			panic("ParseExpr: ill-formed let")
-		}
-		inits := parseInits(x.at(1))
-		body := parseEach(x.items[2:])
+	case "let":
+		inits := parseInits(items[1])
+		body := parseEach(items[2:])
 		return LetExpr{inits, body}
-	}
-	if head == Intern("define") {
-		if x.len() < 3 {
-			panic("ParseExpr: ill-formed define")
-		}
-		switch pattern := x.at(1).(type) {
+	case "define":
+		switch pattern := items[1].(type) {
 		case *Symbol:
-			return DefineExpr{pattern, ParseExpr(x.at(2))}
+			return DefineExpr{pattern, ParseExpr(items[2])}
 		case *ListLiteral:
 			if pattern.len() == 0 {
-				panic("ParseExpr: ill-formed define")
+				panic("ParseExpr: ill-formed define form")
 			}
 			name, ok := pattern.head().(*Symbol)
 			if !ok {
-				panic("ParseExpr: ill-formed define")
+				panic("ParseExpr: ill-formed define form")
 			}
 			funcExpr := FuncExpr{
 				parseParams(pattern.tail()),
-				parseEach(x.items[2:]),
+				parseEach(items[2:]),
 			}
 			return DefineExpr{name, funcExpr}
 		}
-		panic("ParseExpr: ill-formed define")
-	}
-	if head == Intern("if") {
-		if x.len() < 2 {
-			panic("ParseExpr: ill-formed if")
-		}
-		clauses := make([]CondClause, x.len()-1)
-		for i, item := range x.items[1:] {
+		panic("ParseExpr: ill-formed define form")
+	case "if":
+		clauses := make([]CondClause, len(items)-1)
+		for i, item := range items[1:] {
 			clauses[i] = parseCondClause(item)
 		}
 		return CondExpr{clauses}
-	}
-	if head == Intern("and") {
-		return AndExpr{parseEach(x.items[1:])}
-	}
-	if head == Intern("or") {
-		return OrExpr{parseEach(x.items[1:])}
-	}
-	if head == Intern("match") {
-		if x.len() < 3 {
-			panic("ParseExpr: ill-formed match")
-		}
-		clauses := make([]MatchClause, x.len()-2)
-		for i, item := range x.items[2:] {
+	case "and":
+		return AndExpr{parseEach(items[1:])}
+	case "or":
+		return OrExpr{parseEach(items[1:])}
+	case "match":
+		clauses := make([]MatchClause, len(items)-2)
+		for i, item := range items[2:] {
 			clauses[i] = parseMatchClause(item)
 		}
 		return MatchExpr{
-			ParseExpr(x.at(1)),
+			ParseExpr(items[1]),
 			clauses,
 		}
-	}
-	items := x.items
-	if head == Intern("call") {
-		if len(items) == 1 {
-			panic("ParseExpr: empty call")
-		}
+	case "call":
 		items = items[1:]
-		// fall through
+		break
 	}
 	funcExpr := ParseExpr(items[0])
 	argExprs := parseEach(items[1:])
