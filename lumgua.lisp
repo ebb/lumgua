@@ -110,7 +110,7 @@
   (let ((n (strlength s))
 	(se (cellnew "")))
     (for 0 n
-	 (func (i)
+	 (subr (i)
 	   (strextend se (let ((c (strget s i)))
 			   (cond
 			       (case (= c "\\") "\\\\")
@@ -157,7 +157,7 @@
 	                (else (strextend s name)))
 	            (for fp
 	                 (+ fp nvars)
-	                 (func (i)
+	                 (subr (i)
 		           (strextend s " ")
 		           (strextend s (write (arrayget stack i)))))
 	            (strextend s ")")
@@ -168,7 +168,7 @@
       (case (cont rstack stack)
           (let ((n (arraylength rstack)))
             (for 1 n
-	         (func (i)
+	         (subr (i)
 	           (let ((j (- n i)))
 		     (match (arrayget rstack j)
 		         (case (return f fp pc)
@@ -190,20 +190,20 @@
 
 (define (repl)
   (log (call/cc
-	(func (cc)
+	(subr (cc)
 	  (cellput throwfunc
-		   (func (s)
-		     (call/cc (func (xx)
+		   (subr (s)
+		     (call/cc (subr (xx)
 				(let ((softpanic (cellget throwfunc)))
 				  (cellput throwfunc hardpanic)
 				  (showbacktrace xx)
 				  (cellput throwfunc softpanic))
 				(cc s)))))
 	  "entering REPL")))
-  (loop (func ()
+  (loop (subr ()
 	  (let ((text (http 'get "http://localhost:8082/eval" '())))
 	    (let ((exps (readall text)))
-	      (foreach (func (exp)
+	      (foreach (subr (exp)
 			 (log (write (call (funcnew (compile exp)
 					            (arraynew 0))))))
 		       exps))))))
@@ -239,7 +239,7 @@
 	          (log (strcat &("name: " name)))
 	          (log (strcat &("nvars: " (write nvars))))
 	          (log (strcat &("freerefs: " (write freerefs))))
-	          (foldl (func (pc instr)
+	          (foldl (subr (pc instr)
 		           (showinstr pc instr)
 		           (+ pc 1))
 	                 0

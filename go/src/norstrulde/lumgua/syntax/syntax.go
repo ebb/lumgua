@@ -505,7 +505,7 @@ func ParseExpr(lit Literal) Expr {
 		return BeginExpr{body}
 	case "goto":
 		return GotoExpr{ParseExpr(items[1])}
-	case "func":
+	case "func", "subr":
 		params := parseParams(items[1])
 		body := parseEach(items[2:])
 		return FuncExpr{params, body}
