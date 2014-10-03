@@ -22,7 +22,8 @@
     (f b a)))
 
 (define (foldl f z x)
-  (if ((nilp x) z)
+  (cond
+      (case (nilp x) z)
       (else
 	(goto (foldl f (f z (car x)) (cdr x))))))
 
@@ -40,14 +41,16 @@
   (goto (loop f)))
 
 (define (for i n f)
-  (if ((< i n)
-       (f i)
-       (goto (for (+ i 1) n f)))))
+  (cond
+      (case (< i n)
+          (f i)
+          (goto (for (+ i 1) n f)))))
 
 (define (foreach f x)
-  (if ((not (nilp x))
-       (f (car x))
-       (goto (foreach f (cdr x))))))
+  (cond
+      (case (not (nilp x))
+          (f (car x))
+          (goto (foreach f (cdr x))))))
 
 (define (map f x)
   (foldr (func (elt z)
@@ -57,8 +60,9 @@
 
 (define (filter pred x)
   (foldr (func (elt z)
-	   (if ((pred elt)
-		(cons elt z))
+	   (cond
+	       (case (pred elt)
+		   (cons elt z))
 	       (else z)))
 	 '()
 	 x))
@@ -74,12 +78,14 @@
   (foldl snoc '() x))
 
 (define (append x y)
-  (if ((nilp y) x)
-      ((nilp x) y)
+  (cond
+      (case (nilp y) x)
+      (case (nilp x) y)
       (else (foldr cons y x))))
 
 (define (not x)
-  (if (x F)
+  (cond
+      (case x F)
       (else T)))
 
 (define first car)
@@ -93,7 +99,8 @@
   (third (cdr x)))
 
 (define (nth n x)
-  (if ((= n 0) (car x))
+  (cond
+      (case (= n 0) (car x))
       (else (goto (nth (- n 1) (cdr x))))))
 
 (define (strextend cell str)
@@ -105,26 +112,28 @@
     (for 0 n
 	 (func (i)
 	   (strextend se (let ((c (strget s i)))
-			   (if ((= c "\\") "\\\\")
-			       ((= c "\"") "\\\"")
-			       ((= c "\n") "\\n")
-			       ((= c "\t") "\\t")
+			   (cond
+			       (case (= c "\\") "\\\\")
+			       (case (= c "\"") "\\\"")
+			       (case (= c "\n") "\\n")
+			       (case (= c "\t") "\\t")
 			       (else c))))))
     (cellget se)))
 
 (define (writelist x)
-  (if ((= x '())
-       "()")
+  (cond
+      (case (= x '())
+          "()")
       (else
-       (let ((inards (foldl (func (z e)
-			      (strcat &(z " " (write e))))
-			    (write (car x))
-			    (cdr x))))
-	 (strcat &("(" inards ")"))))))
+          (let ((inards (foldl (func (z e)
+			         (strcat &(z " " (write e))))
+			       (write (car x))
+			       (cdr x))))
+	    (strcat &("(" inards ")"))))))
 
 (define (write x)
   (match &((typeof x))
-    ((bool) (if (x "<true>") (else "<false>")))
+    ((bool) (cond (case x "<true>") (else "<false>")))
     ((number) (itoa x))
     ((symbol) (symbolname x))
     ((string) (strcat &("\"" (escape x) "\"")))
@@ -142,8 +151,9 @@
      (match (templateopen temp)
        ((template name nvars freerefs code)
 	(let ((s (cellnew "(")))
-	  (if ((= name "")
-	       (strextend s "<anon>"))
+	  (cond
+	      (case (= name "")
+	          (strextend s "<anon>"))
 	      (else (strextend s name)))
 	  (for fp
 	       (+ fp nvars)
@@ -199,8 +209,9 @@
 		       exps))))))
 
 (define (detect pred x)
-  (if ((nilp x) F)
-      ((pred (car x)) T)
+  (cond
+      (case (nilp x) F)
+      (case (pred (car x)) T)
       (else (goto (detect pred (cdr x))))))
 
 (define (member x s)
@@ -223,20 +234,21 @@
 (define (showtemplate template nesting)
   (match (templateopen template)
     ((template name nvars freerefs code)
-     (if ((= nesting '())
-	  (log (strcat &("name: " name)))
-	  (log (strcat &("nvars: " (write nvars))))
-	  (log (strcat &("freerefs: " (write freerefs))))
-	  (foldl (func (pc instr)
-		   (showinstr pc instr)
-		   (+ pc 1))
-	         0
-	         code)
-          'end)
+     (cond
+         (case (= nesting '())
+	     (log (strcat &("name: " name)))
+	     (log (strcat &("nvars: " (write nvars))))
+	     (log (strcat &("freerefs: " (write freerefs))))
+	     (foldl (func (pc instr)
+		      (showinstr pc instr)
+		      (+ pc 1))
+	            0
+	            code)
+             'end)
 	 (else
-	  (match (nth (car nesting) code)
-	    ((close template)
-	     (goto (showtemplate template (cdr nesting))))))))))
+	     (match (nth (car nesting) code)
+	       ((close template)
+	        (goto (showtemplate template (cdr nesting))))))))))
 
 (define main repl)
 

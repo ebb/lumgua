@@ -296,20 +296,37 @@ func parseEach(forms []Literal) []Expr {
 }
 
 func parseCondClause(form Literal) CondClause {
-	list, ok := form.(*ListLiteral)
-	if !ok || list.len() < 2 {
+	fail := func() CondClause {
 		panic("ParseExpr: ill-formed cond clause")
 	}
-	head := list.head()
-	if head == Intern("else") {
+	list, ok := form.(*ListLiteral)
+	if !ok {
+		fail()
+	}
+	items := list.items
+	head, ok := items[0].(*Symbol)
+	if !ok {
+		fail()
+	}
+	switch head.Name {
+	case "case":
+		if len(items) < 3 {
+			fail()
+		}
+		return CondClause{
+			ParseExpr(items[1]),
+			parseEach(items[2:]),
+		}
+	case "else":
+		if len(items) < 2 {
+			fail()
+		}
 		return CondClause{
 			QuoteExpr{Bool(true)},
-			parseEach(list.items[1:]),
+			parseEach(items[1:]),
 		}
-	}
-	return CondClause{
-		ParseExpr(head),
-		parseEach(list.items[1:]),
+	default:
+		return fail()
 	}
 }
 
@@ -495,7 +512,7 @@ func ParseExpr(lit Literal) Expr {
 			return DefineExpr{name, funcExpr}
 		}
 		panic("ParseExpr: ill-formed define form")
-	case "if":
+	case "cond":
 		clauses := make([]CondClause, len(items)-1)
 		for i, item := range items[1:] {
 			clauses[i] = parseCondClause(item)
