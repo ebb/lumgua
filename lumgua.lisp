@@ -176,7 +176,7 @@
   (cellnew hardpanic))
 
 (define (throw s)
-  ((cellget throwfunc) s))
+  (call (cellget throwfunc) s))
 
 (define (repl)
   (log (call/cc
@@ -194,8 +194,8 @@
 	  (let ((text (http 'get "http://localhost:8082/eval" '())))
 	    (let ((exps (readall text)))
 	      (foreach (func (exp)
-			 (log (write ((funcnew (compile exp)
-					       (arraynew 0))))))
+			 (log (write (call (funcnew (compile exp)
+					            (arraynew 0))))))
 		       exps))))))
 
 (define (detect pred x)

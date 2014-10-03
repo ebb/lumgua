@@ -255,15 +255,6 @@ func LiteralValue(lit Literal) Value {
 	return lit
 }
 
-func parseCallExpr(form *ListLiteral) Expr {
-	if form.len() == 0 {
-		panic("ParseExpr: empty call")
-	}
-	funcExpr := ParseExpr(form.head())
-	argExprs := parseEach(form.items[1:])
-	return CallExpr{funcExpr, argExprs}
-}
-
 func parseParams(lit Literal) []*Symbol {
 	x, ok := lit.(*ListLiteral)
 	if !ok {
@@ -424,7 +415,7 @@ func ParseExpr(lit Literal) Expr {
 	}
 	head, ok := x.head().(*Symbol)
 	if !ok {
-		return parseCallExpr(x)
+		panic("ParseExpr: compound form does not start with a symbol")
 	}
 	if head == Intern("quasiquote") {
 		if x.len() != 2 {
@@ -541,7 +532,17 @@ func ParseExpr(lit Literal) Expr {
 			clauses,
 		}
 	}
-	return parseCallExpr(x)
+	items := x.items
+	if head == Intern("call") {
+		if len(items) == 1 {
+			panic("ParseExpr: empty call")
+		}
+		items = items[1:]
+		// fall through
+	}
+	funcExpr := ParseExpr(items[0])
+	argExprs := parseEach(items[1:])
+	return CallExpr{funcExpr, argExprs}
 }
 
 func Parse(lit Literal) (_ Expr, err error) {
