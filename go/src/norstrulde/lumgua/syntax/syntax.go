@@ -3,6 +3,7 @@ package syntax
 import (
 	"bufio"
 	"errors"
+	"fmt"
 	"io"
 	. "norstrulde/lumgua/machine"
 	"strconv"
@@ -287,6 +288,48 @@ func parseInits(lit Literal) []InitPair {
 	return inits
 }
 
+func parseBody(forms []Literal) Expr {
+	fail := func() Expr {
+		panic("ParseExpr: ill-formed body")
+	}
+	n := len(forms)
+	if n == 1 {
+		return ParseExpr(forms[0])
+	}
+	inits := make([]InitPair, n-1)
+	for i := 0; i < n-1; i++ {
+		list, ok := forms[i].(*ListLiteral)
+		if !ok {
+			fmt.Println("case 1")
+			return fail()
+		}
+		items := list.items
+		// TODO Generalize for len(items) > 3.
+		if len(items) != 3 {
+			fmt.Printf("case 2: %d\n", len(items))
+			fmt.Printf("%s\n", items[0].(*Symbol).Name)
+			fmt.Printf("%s\n", items[1].(*ListLiteral).items[0].(*Symbol).Name)
+			return fail()
+		}
+		head, ok := items[0].(*Symbol)
+		if !ok || head.Name != "let" {
+			fmt.Println("case 3")
+			return fail()
+		}
+		name, ok := items[1].(*Symbol)
+		if !ok {
+			fmt.Println("case 4")
+			return fail()
+		}
+		inits[i].name = name
+		inits[i].expr = ParseExpr(items[2])
+	}
+	return LetExpr{
+		inits,
+		[]Expr{ParseExpr(forms[n-1])},
+	}
+}
+
 func parseEach(forms []Literal) []Expr {
 	exprs := make([]Expr, len(forms))
 	for i, form := range forms {
@@ -315,7 +358,7 @@ func parseCondClause(form Literal) CondClause {
 		}
 		return CondClause{
 			ParseExpr(items[1]),
-			parseEach(items[2:]),
+			[]Expr{parseBody(items[2:])},
 		}
 	case "else":
 		if len(items) < 2 {
@@ -323,7 +366,7 @@ func parseCondClause(form Literal) CondClause {
 		}
 		return CondClause{
 			QuoteExpr{Bool(true)},
-			parseEach(items[1:]),
+			[]Expr{parseBody(items[1:])},
 		}
 	default:
 		return fail()
@@ -414,7 +457,7 @@ func parseMatchClause(lit Literal) MatchClause {
 				return fail()
 			}
 		}
-		body := parseEach(items[2:])
+		body := []Expr{parseBody(items[2:])}
 		return MatchClause{
 			tag: tag,
 			params: params,
@@ -427,7 +470,7 @@ func parseMatchClause(lit Literal) MatchClause {
 		return MatchClause{
 			tag: head,
 			params: []*Symbol{},
-			body: parseEach(items[1:]),
+			body: []Expr{parseBody(items[1:])},
 		}
 	default:
 		return fail()
@@ -464,7 +507,6 @@ func ParseExpr(lit Literal) Expr {
 	arityMins := map[string]int{
 		"begin": 2,
 		"func": 3,
-		"let": 3,
 		"define": 3,
 		"if": 2,
 		"match": 3,
@@ -507,12 +549,14 @@ func ParseExpr(lit Literal) Expr {
 		return GotoExpr{ParseExpr(items[1])}
 	case "func", "subr":
 		params := parseParams(items[1])
-		body := parseEach(items[2:])
-		return FuncExpr{params, body}
+		body := parseBody(items[2:])
+		return FuncExpr{params, []Expr{body}}
+/*
 	case "let":
 		inits := parseInits(items[1])
 		body := parseEach(items[2:])
 		return LetExpr{inits, body}
+*/
 	case "define":
 		switch pattern := items[1].(type) {
 		case *Symbol:
@@ -527,7 +571,7 @@ func ParseExpr(lit Literal) Expr {
 			}
 			funcExpr := FuncExpr{
 				parseParams(pattern.tail()),
-				parseEach(items[2:]),
+				[]Expr{parseBody(items[2:])},
 			}
 			return DefineExpr{name, funcExpr}
 		}
