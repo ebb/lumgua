@@ -1,9 +1,10 @@
 Lumgua is a simple programming language.  Sample code:
 
 (define (foldl f z x)
-  (if ((nilp x) z)
+   (cond
+      (case (nilp x) z)
       (else
-	(goto (foldl f (f z (car x)) (cdr x))))))
+         (goto (foldl f (f z (car x)) (cdr x))))))
 
 
 Getting Started
