@@ -270,23 +270,6 @@ func parseParams(lit Literal) []*Symbol {
 	return params
 }
 
-func parseInits(lit Literal) []InitPair {
-	list, ok := lit.(*ListLiteral)
-	if !ok || list.len() == 0 {
-		panic("ParseExpr: ill-formed init list")
-	}
-	inits := make([]InitPair, list.len())
-	for i, item := range list.items {
-		pair, ok := item.(*ListLiteral)
-		if !ok || pair.len() != 2 {
-			panic("ParseExpr: ill-formed init list")
-		}
-		inits[i].name, ok = pair.head().(*Symbol)
-		inits[i].expr = ParseExpr(pair.at(1))
-	}
-	return inits
-}
-
 func parseBody(forms []Literal) Expr {
 	fail := func() Expr {
 		panic("ParseExpr: ill-formed body")
@@ -504,6 +487,7 @@ func ParseExpr(lit Literal) Expr {
 		"if": 2,
 		"match": 3,
 		"call": 2,
+		"let": 3,
 	}
 	if arity, ok := fixedArities[head.Name]; ok {
 		if len(items) != arity+1 {
@@ -544,12 +528,12 @@ func ParseExpr(lit Literal) Expr {
 		params := parseParams(items[1])
 		body := parseBody(items[2:])
 		return FuncExpr{params, []Expr{body}}
-/*
 	case "let":
-		inits := parseInits(items[1])
-		body := parseEach(items[2:])
-		return LetExpr{inits, body}
-*/
+		name, ok := items[1].(*Symbol)
+		if !ok || name.Name != "_" {
+			panic("ParseExpr: ill-formed let form")
+		}
+		return parseBody(items[2:])
 	case "define":
 		switch pattern := items[1].(type) {
 		case *Symbol:

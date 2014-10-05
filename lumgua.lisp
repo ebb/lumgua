@@ -120,16 +120,14 @@
       (for 0 n
          (subr (i)
             (strextend se
-               ; TODO Fix this kludge.
-               (cond
-                  (else
-                     (let c (strget s i))
-                     (cond
-                        (case (= c "\\") "\\\\")
-                        (case (= c "\"") "\\\"")
-                        (case (= c "\n") "\\n")
-                        (case (= c "\t") "\\t")
-                        (else c)))))))
+               (let _
+                  (let c (strget s i))
+                  (cond
+                     (case (= c "\\") "\\\\")
+                     (case (= c "\"") "\\\"")
+                     (case (= c "\n") "\\n")
+                     (case (= c "\t") "\\t")
+                     (else c))))))
       (cellget se)))
 
 (subr (writelist x)
@@ -226,14 +224,12 @@
       (loop
          (subr ()
             (let text (http 'get "http://localhost:8082/eval" '()))
-            ; TODO Fix this kludge.
-            (cond
-               (else
-                  (let exps (readall text))
-                  (foreach
-                     (subr (exp)
-                        (log (write (call (funcnew (compile exp) (arraynew 0))))))
-                     exps)))))))
+            (let _
+               (let exps (readall text))
+               (foreach
+                  (subr (exp)
+                     (log (write (call (funcnew (compile exp) (arraynew 0))))))
+                  exps))))))
 
 (func (detect pred x)
    (cond
