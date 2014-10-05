@@ -3,7 +3,6 @@ package syntax
 import (
 	"bufio"
 	"errors"
-	"fmt"
 	"io"
 	. "norstrulde/lumgua/machine"
 	"strconv"
@@ -610,6 +609,34 @@ func Parse(lit Literal) (_ Expr, err error) {
 		}
 	}()
 	return ParseExpr(lit), nil
+}
+
+func ParseToplevel(lit Literal) (expr Expr, err error) {
+	list, ok := lit.(*ListLiteral)
+	if !ok {
+		err = errors.New("ParseToplevel: not a compound form")
+		return
+	}
+	if list.len() < 1 {
+		err = errors.New("ParseToplevel: ill-formed toplevel form")
+		return
+	}
+	head, ok := list.items[0].(*Symbol)
+	if !ok {
+		err = errors.New("ParseToplevel: ill-formed toplevel form")
+		return
+	}
+	switch head.Name {
+	case "func", "subr", "let":
+		freshItems := make([]Literal, len(list.items))
+		copy(freshItems, list.items)
+		freshItems[0] = Intern("define")
+		expr, err = Parse(newListLiteral(freshItems...))
+		return
+	default:
+		err = errors.New("ParseToplevel: ill-formed toplevel form")
+		return
+	}
 }
 
 type Expr interface {

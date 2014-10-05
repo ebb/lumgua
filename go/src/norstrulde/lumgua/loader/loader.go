@@ -25,7 +25,7 @@ func fetchSourceForms(address, name string) ([]Literal, error) {
 func parseToplevel(forms []Literal) ([]DefineExpr, error) {
 	defs := make([]DefineExpr, len(forms))
 	for i, form := range forms {
-		expr, err := Parse(form)
+		expr, err := ParseToplevel(form)
 		if err != nil {
 			return nil, err
 		}

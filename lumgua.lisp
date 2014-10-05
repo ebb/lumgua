@@ -1,70 +1,70 @@
-(define (consp x)
+(func (consp x)
    (and
       (= (typeof x) 'list)
       (!= x '())))
 
-(define (nilp x)
+(func (nilp x)
    (= x '()))
 
-(define (caar x)
+(func (caar x)
    (car (car x)))
 
-(define (cadr x)
+(func (cadr x)
    (car (cdr x)))
 
-(define (cdar x)
+(func (cdar x)
    (cdr (car x)))
 
-(define (cddr x)
+(func (cddr x)
    (cdr (cdr x)))
 
-(define (flip f)
+(func (flip f)
    (func (a b)
       (f b a)))
 
-(define (foldl f z x)
+(func (foldl f z x)
    (cond
       (case (nilp x) z)
       (else
          (goto (foldl f (f z (car x)) (cdr x))))))
 
-(define (foldr f z x)
+(func (foldr f z x)
    (foldl (flip f) z (reverse x)))
 
-(define (length x)
+(func (length x)
    (foldl
       (func (n elt)
          (+ n 1))
       0
       x))
 
-(define (loop f)
+(subr (loop f)
    (begin
       (f)
       (goto (loop f))))
 
-(define (for i n f)
+(subr (for i n f)
    (cond
       (case (< i n)
          (begin
             (f i)
             (goto (for (+ i 1) n f))))))
 
-(define (foreach f x)
+(subr (foreach f x)
    (cond
       (case (not (nilp x))
          (begin
             (f (car x))
             (goto (foreach f (cdr x)))))))
 
-(define (map f x)
+(func (map f x)
    (foldr
       (func (elt z)
          (cons (f elt) z))
       '()
       x))
 
-(define (filter pred x)
+(func (filter pred x)
    (foldr
       (func (elt z)
          (cond
@@ -74,46 +74,46 @@
       '()
       x))
 
-(define (compose f g)
+(func (compose f g)
    (func (x)
       (f (g x))))
 
-(define (snoc d a)
+(func (snoc d a)
    (cons a d))
 
-(define (reverse x)
+(func (reverse x)
    (foldl snoc '() x))
 
-(define (append x y)
+(func (append x y)
    (cond
       (case (nilp y) x)
       (case (nilp x) y)
       (else (foldr cons y x))))
 
-(define (not x)
+(func (not x)
    (cond
       (case x F)
       (else T)))
 
-(define first car)
+(let first car)
 
-(define second cadr)
+(let second cadr)
 
-(define (third x)
+(func (third x)
    (second (cdr x)))
 
-(define (fourth x)
+(func (fourth x)
    (third (cdr x)))
 
-(define (nth n x)
+(func (nth n x)
    (cond
       (case (= n 0) (car x))
       (else (goto (nth (- n 1) (cdr x))))))
 
-(define (strextend cell str)
+(subr (strextend cell str)
    (cellput cell (strcat &((cellget cell) str))))
 
-(define (escape s)
+(subr (escape s)
    (let n (strlength s))
    (let se (cellnew ""))
    (begin
@@ -132,7 +132,7 @@
                         (else c)))))))
       (cellget se)))
 
-(define (writelist x)
+(subr (writelist x)
    (cond
       (case (= x '())
          "()")
@@ -145,7 +145,7 @@
                (cdr x)))
          (strcat &("(" inards ")")))))
 
-(define (write x)
+(func (write x)
    (match &((typeof x))
       (case (bool) (cond (case x "<true>") (else "<false>")))
       (case (number) (itoa x))
@@ -159,7 +159,7 @@
       (case (array) "<array>")
       (else (throw "write: unknown type"))))
 
-(define (showoneframe stack f fp)
+(subr (showoneframe stack f fp)
    (match (funcopen f)
       (case (func temp env)
          (match (templateopen temp)
@@ -179,7 +179,7 @@
                   (strextend s ")")
                   (log (cellget s))))))))
 
-(define (showbacktrace c)
+(subr (showbacktrace c)
    (match (contopen c)
       (case (cont rstack stack)
          (let n (arraylength rstack))
@@ -190,23 +190,23 @@
                   (case (return f fp pc)
                      (showoneframe stack f fp))))))))
 
-(define (time f)
+(subr (time f)
    (- 0
       (- (now)
          (begin (f) (now)))))
 
-(define (hardpanic s)
+(subr (hardpanic s)
    (begin
       (log s)
       (exit 1)))
 
-(define throwfunc
+(let throwfunc
    (cellnew hardpanic))
 
-(define (throw s)
+(subr (throw s)
    (call (cellget throwfunc) s))
 
-(define (repl)
+(subr (repl)
    (begin
       (log
          (call/cc
@@ -235,16 +235,16 @@
                         (log (write (call (funcnew (compile exp) (arraynew 0))))))
                      exps)))))))
 
-(define (detect pred x)
+(func (detect pred x)
    (cond
       (case (nilp x) F)
       (case (pred (car x)) T)
       (else (goto (detect pred (cdr x))))))
 
-(define (member x s)
+(func (member x s)
    (detect (func (y) (= x y)) s))
 
-(define (tabify vals)
+(func (tabify vals)
    (strcat
       (cons (write (car vals))
          (map
@@ -252,15 +252,15 @@
                (strcat &("\t" (write val))))
             (cdr vals)))))
 
-(define (showinstr pc instr)
+(subr (showinstr pc instr)
    (log (tabify (cons pc instr))))
 
-(define (showfunc f nesting)
+(subr (showfunc f nesting)
    (match (funcopen f)
       (case (func temp env)
          (showtemplate temp nesting))))
 
-(define (showtemplate template nesting)
+(subr (showtemplate template nesting)
    (match (templateopen template)
       (case (template name nvars freerefs code)
          (cond
@@ -282,7 +282,7 @@
                   (case (close template)
                      (goto (showtemplate template (cdr nesting))))))))))
 
-(define main repl)
+(let main repl)
 
 ; some tests
 ;
