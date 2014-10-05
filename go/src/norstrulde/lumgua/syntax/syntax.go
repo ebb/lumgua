@@ -300,25 +300,19 @@ func parseBody(forms []Literal) Expr {
 	for i := 0; i < n-1; i++ {
 		list, ok := forms[i].(*ListLiteral)
 		if !ok {
-			fmt.Println("case 1")
 			return fail()
 		}
 		items := list.items
 		// TODO Generalize for len(items) > 3.
 		if len(items) != 3 {
-			fmt.Printf("case 2: %d\n", len(items))
-			fmt.Printf("%s\n", items[0].(*Symbol).Name)
-			fmt.Printf("%s\n", items[1].(*ListLiteral).items[0].(*Symbol).Name)
 			return fail()
 		}
 		head, ok := items[0].(*Symbol)
 		if !ok || head.Name != "let" {
-			fmt.Println("case 3")
 			return fail()
 		}
 		name, ok := items[1].(*Symbol)
 		if !ok {
-			fmt.Println("case 4")
 			return fail()
 		}
 		inits[i].name = name
