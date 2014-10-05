@@ -481,21 +481,21 @@ func ParseExpr(lit Literal) Expr {
 		"goto": 1,
 	}
 	arityMins := map[string]int{
-		"begin": 2,
-		"func": 3,
-		"define": 3,
-		"if": 2,
-		"match": 3,
-		"call": 2,
-		"let": 3,
+		"begin": 1,
+		"func": 2,
+		"define": 2,
+		"cond": 1,
+		"match": 2,
+		"call": 1,
+		"let": 2,
 	}
 	if arity, ok := fixedArities[head.Name]; ok {
-		if len(items) != arity+1 {
+		if len(items[1:]) != arity {
 			panic("ParseExpr: ill-formed " + head.Name + " form")
 		}
 	}
 	if min, ok := arityMins[head.Name]; ok {
-		if len(items) < min {
+		if len(items[1:]) < min {
 			panic("ParseExpr: ill-formed " + head.Name + " form")
 		}
 	}
