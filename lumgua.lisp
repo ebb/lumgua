@@ -19,7 +19,7 @@
    (cdr (cdr x)))
 
 (func (flip f)
-   (func (a b)
+   (func (_ a b)
       (f b a)))
 
 (func (foldl f z x)
@@ -33,7 +33,7 @@
 
 (func (length x)
    (foldl
-      (func (n elt)
+      (func (_ n elt)
          (+ n 1))
       0
       x))
@@ -59,14 +59,14 @@
 
 (func (map f x)
    (foldr
-      (func (elt z)
+      (func (_ elt z)
          (cons (f elt) z))
       '()
       x))
 
 (func (filter pred x)
    (foldr
-      (func (elt z)
+      (func (_ elt z)
          (cond
             (case (pred elt)
                (cons elt z))
@@ -75,7 +75,7 @@
       x))
 
 (func (compose f g)
-   (func (x)
+   (func (_ x)
       (f (g x))))
 
 (func (snoc d a)
@@ -118,7 +118,7 @@
    (let se (cellnew ""))
    (begin
       (for 0 n
-         (subr (i)
+         (subr (_ i)
             (strextend se
                (let _
                   (let c (strget s i))
@@ -137,7 +137,7 @@
       (else
          (let inards
             (foldl
-               (func (z e)
+               (func (_ z e)
                   (strcat &(z " " (write e))))
                (write (car x))
                (cdr x)))
@@ -170,7 +170,7 @@
                      (else
                         (strextend s name)))
                   (for fp (+ fp nvars)
-                     (subr (i)
+                     (subr (_ i)
                         (begin
                            (strextend s " ")
                            (strextend s (write (arrayget stack i))))))
@@ -182,7 +182,7 @@
       (case (cont rstack stack)
          (let n (arraylength rstack))
          (for 1 n
-            (subr (i)
+            (subr (_ i)
                (let j (- n i))
                (match (arrayget rstack j)
                   (case (return f fp pc)
@@ -208,12 +208,12 @@
    (begin
       (log
          (call/cc
-            (subr (cc)
+            (subr (_ cc)
                (begin
                   (cellput throwfunc
-                     (subr (s)
+                     (subr (_ s)
                         (call/cc
-                           (subr (xx)
+                           (subr (_ xx)
                               (let softpanic (cellget throwfunc))
                               (begin
                                  (cellput throwfunc hardpanic)
@@ -222,12 +222,12 @@
                                  (cc s))))))
                   "entering REPL"))))
       (loop
-         (subr ()
+         (subr (_)
             (let text (http 'get "http://localhost:8082/eval" '()))
             (let _
                (let exps (readall text))
                (foreach
-                  (subr (exp)
+                  (subr (_ exp)
                      (log (write (call (funcnew (compile exp) (arraynew 0))))))
                   exps))))))
 
@@ -238,13 +238,13 @@
       (else (goto (detect pred (cdr x))))))
 
 (func (member x s)
-   (detect (func (y) (= x y)) s))
+   (detect (func (_ y) (= x y)) s))
 
 (func (tabify vals)
    (strcat
       (cons (write (car vals))
          (map
-            (func (val)
+            (func (_ val)
                (strcat &("\t" (write val))))
             (cdr vals)))))
 
@@ -266,7 +266,7 @@
                   (log (strcat &("nvars: " (write nvars))))
                   (log (strcat &("freerefs: " (write freerefs))))
                   (foldl
-                     (subr (pc instr)
+                     (subr (_ pc instr)
                         (begin
                            (showinstr pc instr)
                            (+ pc 1)))

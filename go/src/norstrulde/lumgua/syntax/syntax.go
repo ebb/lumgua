@@ -260,9 +260,10 @@ func parseParams(lit Literal) []*Symbol {
 	if !ok {
 		panic("ParseExpr: ill-formed parameter list")
 	}
-	params := make([]*Symbol, x.len())
-	for i, item := range x.items {
-		params[i], ok = item.(*Symbol)
+	items := x.items
+	params := make([]*Symbol, len(items)-1)
+	for i := 1; i < len(items); i++ {
+		params[i-1], ok = items[i].(*Symbol)
 		if !ok {
 			panic("ParseExpr: bad parameter")
 		}
@@ -547,7 +548,7 @@ func ParseExpr(lit Literal) Expr {
 				panic("ParseExpr: ill-formed define form")
 			}
 			funcExpr := FuncExpr{
-				parseParams(pattern.tail()),
+				parseParams(pattern),
 				[]Expr{parseBody(items[2:])},
 			}
 			return DefineExpr{name, funcExpr}
