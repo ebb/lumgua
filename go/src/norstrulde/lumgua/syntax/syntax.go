@@ -162,7 +162,7 @@ func read(buf io.ByteScanner) Literal {
 		panic("read: premature end of file")
 	}
 	if err != nil {
-		panic("read: input error:" + err.Error())
+		panic("read: input error: " + err.Error())
 	}
 	switch b {
 	case ')':  panic("read: unmatched close-parenthesis")
