@@ -706,10 +706,6 @@ type MatchClause struct {
 	body   []Expr
 }
 
-type MatcherExpr struct {
-	clauses []MatchClause
-}
-
 type MatchExpr struct {
 	x       Expr
 	clauses []MatchClause
@@ -725,7 +721,6 @@ func (_ DefineExpr) exprVariant()    {}
 func (_ CondExpr) exprVariant()      {}
 func (_ AndExpr) exprVariant()       {}
 func (_ OrExpr) exprVariant()        {}
-func (_ MatcherExpr) exprVariant()   {}
 func (_ MatchExpr) exprVariant()     {}
 func (_ QuasiExpr) exprVariant()     {}
 func (_ RefExpr) exprVariant()       {}
@@ -746,7 +741,6 @@ func (_ LetExpr) macroExprVariant()       {}
 func (_ CondExpr) macroExprVariant()      {}
 func (_ AndExpr) macroExprVariant()       {}
 func (_ OrExpr) macroExprVariant()        {}
-func (_ MatcherExpr) macroExprVariant()   {}
 func (_ MatchExpr) macroExprVariant()     {}
 func (_ QuasiExpr) macroExprVariant()     {}
 
