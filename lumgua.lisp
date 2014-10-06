@@ -67,10 +67,7 @@
 (func (filter pred x)
    (foldr
       (func (_ elt z)
-         (cond
-            (case (pred elt)
-               (cons elt z))
-            (else z)))
+         (if (pred elt) (cons elt z) z))
       '()
       x))
 
@@ -91,9 +88,7 @@
       (else (foldr cons y x))))
 
 (func (not x)
-   (cond
-      (case x F)
-      (else T)))
+   (if x F T))
 
 (let first car)
 
@@ -106,9 +101,9 @@
    (third (cdr x)))
 
 (func (nth n x)
-   (cond
-      (case (= n 0) (car x))
-      (else (goto (nth (- n 1) (cdr x))))))
+   (if (= n 0)
+      (car x)
+      (goto (nth (- n 1) (cdr x)))))
 
 (subr (strextend cell str)
    (cellput cell (strcat &((cellget cell) str))))
@@ -130,7 +125,7 @@
                      (else c))))))
       (cellget se)))
 
-(subr (writelist x)
+(func (writelist x)
    (cond
       (case (= x '())
          "()")
@@ -145,7 +140,7 @@
 
 (func (write x)
    (match &((typeof x))
-      (case (bool) (cond (case x "<true>") (else "<false>")))
+      (case (bool) (if x "T" "F"))
       (case (number) (itoa x))
       (case (symbol) (symbolname x))
       (case (string) (strcat &("\"" (escape x) "\"")))
@@ -164,11 +159,7 @@
             (case (template name nvars freerefs code)
                (let s (cellnew "("))
                (begin
-                  (cond
-                     (case (= name "")
-                        (strextend s "<anon>"))
-                     (else
-                        (strextend s name)))
+                  (strextend s (if (= name "") "<anon>" name))
                   (for fp (+ fp nvars)
                      (subr (_ i)
                         (begin

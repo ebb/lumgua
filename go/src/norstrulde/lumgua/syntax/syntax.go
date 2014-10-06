@@ -480,6 +480,7 @@ func ParseExpr(lit Literal) Expr {
 		"ampersand": 1,
 		"quote": 1,
 		"goto": 1,
+		"if": 3,
 	}
 	arityMins := map[string]int{
 		"begin": 1,
@@ -511,15 +512,12 @@ func ParseExpr(lit Literal) Expr {
 		return AmpersandExpr{parseEach(list.items)}
 	case "quote":
 		return QuoteExpr{LiteralValue(items[1])}
-/*
-	if head == Intern("if") {
+	case "if":
 		return IfExpr{
 			ParseExpr(items[1]),
 			ParseExpr(items[2]),
 			ParseExpr(items[3]),
 		}
-	}
-*/
 	case "begin":
 		body := parseEach(items[1:])
 		return BeginExpr{body}
