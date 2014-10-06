@@ -158,14 +158,20 @@ func readList(buf io.ByteScanner) Literal {
 func read(buf io.ByteScanner) Literal {
 	skipws(buf)
 	b, err := buf.ReadByte()
-	if err != nil {
+	if err == io.EOF {
 		panic("read: premature end of file")
 	}
-	if b == ')' {
-		panic("read: unmatched close-parenthesis")
+	if err != nil {
+		panic("read: input error:" + err.Error())
 	}
-	if reader, ok := readTable[b]; ok {
-		return reader(buf)
+	switch b {
+	case ')':  panic("read: unmatched close-parenthesis")
+	case '"':  return readString(buf)
+	case '\'': return readQuote(buf)
+	case '`':  return readQuasi(buf)
+	case ',':  return readComma(buf)
+	case '&':  return readAmpersand(buf)
+	case '(':  return readList(buf)
 	}
 	buf.UnreadByte()
 	return readAtom(buf)
@@ -910,16 +916,5 @@ func (expr MatchExpr) Expand() Expr {
 			},
 			defaultExpr,
 		}},
-	}
-}
-
-func init() {
-	readTable = map[byte]func(io.ByteScanner) Literal{
-		'"':  readString,
-		'\'': readQuote,
-		'`':  readQuasi,
-		',':  readComma,
-		'&':  readAmpersand,
-		'(':  readList,
 	}
 }
