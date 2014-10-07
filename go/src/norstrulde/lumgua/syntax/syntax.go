@@ -267,9 +267,9 @@ func parseParams(lit Literal) []*Symbol {
 		panic("ParseExpr: ill-formed parameter list")
 	}
 	items := x.items
-	params := make([]*Symbol, len(items)-1)
-	for i := 1; i < len(items); i++ {
-		params[i-1], ok = items[i].(*Symbol)
+	params := make([]*Symbol, len(items))
+	for i := 0; i < len(items); i++ {
+		params[i], ok = items[i].(*Symbol)
 		if !ok {
 			panic("ParseExpr: bad parameter")
 		}
@@ -490,8 +490,9 @@ func ParseExpr(lit Literal) Expr {
 	}
 	arityMins := map[string]int{
 		"begin": 1,
-		"func": 2,
-		"define": 2,
+		"block": 1,
+		"fun": 2,
+		"sub": 2,
 		"cond": 1,
 		"match": 2,
 		"call": 1,
@@ -529,35 +530,12 @@ func ParseExpr(lit Literal) Expr {
 		return BeginExpr{body}
 	case "goto":
 		return GotoExpr{ParseExpr(items[1])}
-	case "func", "subr":
+	case "fun", "sub":
 		params := parseParams(items[1])
 		body := parseBody(items[2:])
 		return FuncExpr{params, []Expr{body}}
-	case "let":
-		name, ok := items[1].(*Symbol)
-		if !ok || name.Name != "_" {
-			panic("ParseExpr: ill-formed let form")
-		}
-		return parseBody(items[2:])
-	case "define":
-		switch pattern := items[1].(type) {
-		case *Symbol:
-			return DefineExpr{pattern, ParseExpr(items[2])}
-		case *ListLiteral:
-			if pattern.len() == 0 {
-				panic("ParseExpr: ill-formed define form")
-			}
-			name, ok := pattern.head().(*Symbol)
-			if !ok {
-				panic("ParseExpr: ill-formed define form")
-			}
-			funcExpr := FuncExpr{
-				parseParams(pattern),
-				[]Expr{parseBody(items[2:])},
-			}
-			return DefineExpr{name, funcExpr}
-		}
-		panic("ParseExpr: ill-formed define form")
+	case "block":
+		return parseBody(items[1:])
 	case "cond":
 		clauses := make([]CondClause, len(items)-1)
 		for i, item := range items[1:] {
@@ -606,22 +584,23 @@ func ParseToplevel(lit Literal) (expr Expr, err error) {
 		err = errors.New("ParseToplevel: not a compound form")
 		return
 	}
-	if list.len() < 1 {
+	items := list.items
+	if len(items) < 1 {
 		err = errors.New("ParseToplevel: ill-formed toplevel form")
 		return
 	}
-	head, ok := list.items[0].(*Symbol)
+	head, ok := items[0].(*Symbol)
 	if !ok {
 		err = errors.New("ParseToplevel: ill-formed toplevel form")
 		return
 	}
 	switch head.Name {
-	case "func", "subr", "let":
-		freshItems := make([]Literal, len(list.items))
-		copy(freshItems, list.items)
-		freshItems[0] = Intern("define")
-		expr, err = Parse(newListLiteral(freshItems...))
-		return
+	case "let":
+		switch pattern := items[1].(type) {
+		case *Symbol:
+			return DefineExpr{pattern, ParseExpr(items[2])}, nil
+		}
+		panic("ParseExpr: ill-formed define form")
 	default:
 		err = errors.New("ParseToplevel: ill-formed toplevel form")
 		return
