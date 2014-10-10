@@ -19,38 +19,56 @@ package scc
 //
 // This algorithm is known as Tarjan's algorithm.
 func Compute(numVertices uint32, edges map[uint32][]uint32) [][]uint32 {
+	//
+	// The preorder slice is used as a table indexed by vertex number. If
+	// the entry is 0, then the vertex has not yet been visited. If the
+	// entry is ^0, then the vertex has already been assigned to a
+	// component. Otherwise, the entry is a depth-first, preorder sequence
+	// number.
+	//
 	components := [][]uint32{}
-	stack := make([]uint32, numVertices+1)
-	index := make([]uint32, numVertices+1)
-	sp := uint32(1)
+	stack := []uint32{}
+	preorder := make([]uint32, numVertices+1)
+	i := uint32(1)
 	var traverse func(uint32) uint32
-	traverse = func(m1 uint32) uint32 {
-		lowlink := sp
-		index[m1] = sp
-		stack[sp] = m1
-		sp++
-		for _, m2 := range edges[m1] {
+	traverse = func(v uint32) uint32 {
+		lowlink := i
+		preorder[v] = i
+		i++
+		stack = append(stack, v)
+		for _, w := range edges[v] {
 			var link uint32
-			if index[m2] == 0 {
-				link = traverse(m2)
-			} else {
-				link = index[m2]
+			switch preorder[w] {
+			case 0:
+				link = traverse(w)
+			default:
+				link = preorder[w]
+			case ^uint32(0):
+				// v and w belong to different components.
+				continue
 			}
 			if link < lowlink {
 				lowlink = link
 			}
 		}
-		if index[m1] == lowlink {
-			c := make([]uint32, sp-index[m1])
-			copy(c, stack[index[m1]:sp])
-			sp = index[m1]
+		if preorder[v] == lowlink {
+			j := len(stack)-1
+			for stack[j] != v {
+				j--
+			}
+			c := make([]uint32, len(stack)-j)
+			copy(c, stack[j:])
+			stack = stack[:j]
+			for _, u := range c {
+				preorder[u] = ^uint32(0)
+			}
 			components = append(components, c)
 		}
 		return lowlink
 	}
-	for m := uint32(1); m <= numVertices; m++ {
-		if index[m] == 0 {
-			traverse(m)
+	for v := uint32(1); v <= numVertices; v++ {
+		if preorder[v] == 0 {
+			traverse(v)
 		}
 	}
 	return components

@@ -76,6 +76,18 @@ var testCases = []testCase{
 		},
 		components: [][]uint32{{6}, {5}, {1, 2, 3, 4, 7}},
 	},
+	{
+		numVertices: 6,
+		edges: map[uint32][]uint32{
+			1: {2, 4},
+			2: {3},
+			3: {2},
+			4: {5},
+			5: {6},
+			6: {5, 2},
+		},
+		components: [][]uint32{{1}, {4}, {2, 3}, {5, 6}},
+	},
 }
 
 func isPartition(n uint32, p [][]uint32) bool {
